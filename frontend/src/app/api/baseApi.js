@@ -2,7 +2,7 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { logout } from '../../features/auth/authSlice';
 
 const baseQuery = fetchBaseQuery({
-  baseUrl: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseUrl: 'https://jewellary-u8qu.onrender.com/api',
   prepareHeaders: (headers, { getState }) => {
     const state = getState();
     const token = state.auth?.token;
