@@ -16,12 +16,20 @@ const app = express();
 app.use(helmet());
 
 // Enable CORS
+// app.use(
+//   cors({
+//     origin: env.CLIENT_URL || '*',
+//     credentials: true,
+//     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//     allowedHeaders: ['Content-Type', 'Authorization', 'x-branch-id']
+//   })
+// );
+
 app.use(
   cors({
-    origin: env.CLIENT_URL || '*',
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-branch-id']
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-branch-id'],
   })
 );
 
