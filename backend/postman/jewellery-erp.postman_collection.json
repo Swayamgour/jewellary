@@ -1,0 +1,281 @@
+{
+  "info": {
+    "name": "Jewellery ERP - Production REST API Collection",
+    "description": "Comprehensive API collection for Jewellery ERP: Auth, Billing, Inventory, Customers, Vendors, Payments, Exchanges, Orders, Expenses, Dashboard, and Reports.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5001/api",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Admin Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@jewelleryerp.com\",\n  \"password\": \"Admin@12345\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Get Current User (Me)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "me"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Billing (Primary Module)",
+      "item": [
+        {
+          "name": "Create Kacha Bill",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"<CUSTOMER_ID>\",\n  \"items\": [\n    {\n      \"productId\": \"<PRODUCT_ID>\",\n      \"barcode\": \"JWL-2609-BAN001\",\n      \"productName\": \"22K Traditional Peacock Gold Bangle\",\n      \"grossWeight\": 25.5,\n      \"stoneWeight\": 0,\n      \"quantity\": 1,\n      \"goldRate\": 7195,\n      \"makingType\": \"PER_GRAM\",\n      \"makingRate\": 450,\n      \"wastagePercent\": 3.5,\n      \"discount\": 0\n    }\n  ],\n  \"discount\": 0,\n  \"payments\": [\n    {\n      \"amount\": 50000,\n      \"paymentMode\": \"CASH\"\n    }\n  ],\n  \"notes\": \"Regular retail walk-in customer\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/billing/kacha",
+              "host": ["{{baseUrl}}"],
+              "path": ["billing", "kacha"]
+            }
+          }
+        },
+        {
+          "name": "Get Kacha Bills",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/billing/kacha?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["billing", "kacha"]
+            }
+          }
+        },
+        {
+          "name": "Convert Kacha to Pakka Bill",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/billing/kacha/<KACHA_BILL_ID>/convert",
+              "host": ["{{baseUrl}}"],
+              "path": ["billing", "kacha", "<KACHA_BILL_ID>", "convert"]
+            }
+          }
+        },
+        {
+          "name": "Create Pakka Bill (GST Invoice)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"<CUSTOMER_ID>\",\n  \"items\": [\n    {\n      \"productId\": \"<PRODUCT_ID>\",\n      \"barcode\": \"JWL-2609-NEC002\",\n      \"productName\": \"22K Antique Floral Bridal Necklace Set\",\n      \"grossWeight\": 48.2,\n      \"stoneWeight\": 3.2,\n      \"quantity\": 1,\n      \"goldRate\": 7195,\n      \"makingType\": \"PER_GRAM\",\n      \"makingRate\": 600,\n      \"wastagePercent\": 4.5,\n      \"stoneAmount\": 12000,\n      \"discount\": 2000\n    }\n  ],\n  \"discount\": 0,\n  \"payments\": [\n    {\n      \"amount\": 100000,\n      \"paymentMode\": \"UPI\",\n      \"modeDetails\": { \"transactionId\": \"UPI123456789\" }\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/billing/pakka",
+              "host": ["{{baseUrl}}"],
+              "path": ["billing", "pakka"]
+            }
+          }
+        },
+        {
+          "name": "Cancel Pakka Bill",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Customer requested cancellation within return policy\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/billing/pakka/<INVOICE_ID>/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["billing", "pakka", "<INVOICE_ID>", "cancel"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Customers",
+      "item": [
+        {
+          "name": "List Customers",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+          }
+        },
+        {
+          "name": "Get Customer Ledger",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/customers/<CUSTOMER_ID>/ledger", "host": ["{{baseUrl}}"], "path": ["customers", "<CUSTOMER_ID>", "ledger"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Vendors",
+      "item": [
+        {
+          "name": "List Vendors",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/vendors", "host": ["{{baseUrl}}"], "path": ["vendors"] }
+          }
+        },
+        {
+          "name": "Get Vendor Ledger",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/vendors/<VENDOR_ID>/ledger", "host": ["{{baseUrl}}"], "path": ["vendors", "<VENDOR_ID>", "ledger"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Inventory & Barcode",
+      "item": [
+        {
+          "name": "Get Stock List",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/inventory?status=AVAILABLE", "host": ["{{baseUrl}}"], "path": ["inventory"] }
+          }
+        },
+        {
+          "name": "Get Stock Movements Audit Trail",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/inventory/movements", "host": ["{{baseUrl}}"], "path": ["inventory", "movements"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Gold Rates",
+      "item": [
+        {
+          "name": "Get Current Bullion Rates",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/gold-rates/current", "host": ["{{baseUrl}}"], "path": ["gold-rates", "current"] }
+          }
+        },
+        {
+          "name": "Set Today's Gold Rate",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metal\": \"GOLD\",\n  \"purity\": \"22K\",\n  \"rate\": 7220,\n  \"notes\": \"Morning market opening rate\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/gold-rates", "host": ["{{baseUrl}}"], "path": ["gold-rates"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard & Analytics",
+      "item": [
+        {
+          "name": "Get Executive Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/dashboard?filter=month", "host": ["{{baseUrl}}"], "path": ["dashboard"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "item": [
+        {
+          "name": "Sales Report",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/reports/sales", "host": ["{{baseUrl}}"], "path": ["reports", "sales"] }
+          }
+        },
+        {
+          "name": "Inventory Valuation Report",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/reports/stock", "host": ["{{baseUrl}}"], "path": ["reports", "stock"] }
+          }
+        },
+        {
+          "name": "Export Excel Report",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/reports/export/excel?reportType=sales", "host": ["{{baseUrl}}"], "path": ["reports", "export", "excel"] }
+          }
+        }
+      ]
+    }
+  ]
+}
