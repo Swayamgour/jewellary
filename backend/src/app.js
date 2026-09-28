@@ -54,7 +54,7 @@ app.use('/api', apiRoutes);
 // Root greeting / health check
 app.get('/', (req, res) => {
   res.status(200).json({
-    name: 'Jewellery ERP API',
+    name: 'Jewellery ERP APIs',
     version: '1.0.0',
     documentation: '/api/health',
     status: 'ONLINE'
