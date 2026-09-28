@@ -4,6 +4,7 @@ import { logout } from '../../features/auth/authSlice';
 const baseQuery = fetchBaseQuery({
   // baseUrl: 'https://jewellary-u8qu.onrender.com/api',
   baseUrl: 'https://jewellary-uqxx.onrender.com/api',
+  // baseUrl: 'http://localhost:5001/api',
   prepareHeaders: (headers, { getState }) => {
     const state = getState();
     const token = state.auth?.token;
