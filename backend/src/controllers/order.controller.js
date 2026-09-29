@@ -2,60 +2,75 @@ const Order = require('../models/Order');
 const PaymentService = require('../services/payment.service');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const BarcodeGenerator = require('../utils/barcodeGenerator');
+const Branch = require('../models/Branch');
+const { nextDocNo } = require('../utils/sequence');
+const { withTransaction } = require('../utils/transaction');
+const { assertBranchAccess } = require('../utils/branchScope');
 const DecimalUtil = require('../utils/decimal');
 const { ORDER_STATUSES } = require('../config/constants');
 const { logAudit } = require('../utils/auditLogger');
 const { AUDIT_ACTIONS } = require('../config/constants');
+
+const ORDER_FLOW = {
+  NEW: ['CONFIRMED', 'CANCELLED'],
+  CONFIRMED: ['MANUFACTURING', 'CANCELLED'],
+  MANUFACTURING: ['QC', 'CANCELLED'],
+  QC: ['MANUFACTURING', 'READY'],
+  READY: ['DELIVERED', 'CANCELLED'],
+  DELIVERED: [],
+  CANCELLED: []
+};
 
 class OrderController {
   static async createOrder(req, res, next) {
     try {
       const { customerId, expectedDeliveryDate, items, totalEstimatedAmount, advancePaid = 0, paymentMode = 'CASH', notes } = req.body;
       const branchId = req.branchId || req.body.branchId || req.user.branchId;
-
-      const orderNo = BarcodeGenerator.generateInvoiceNo('ORD', 'BR', Math.floor(1000 + Math.random() * 9000));
-      const balanceDue = Math.max(0, DecimalUtil.subtract(totalEstimatedAmount, advancePaid));
-
-      const order = new Order({
-        orderNo,
-        customerId,
-        orderDate: new Date(),
-        expectedDeliveryDate,
-        items,
-        totalEstimatedAmount,
-        advancePaid,
-        balanceDue,
-        status: ORDER_STATUSES.CONFIRMED,
-        branchId,
-        createdBy: req.user._id,
-        notes
-      });
-
-      await order.save();
-
-      // If advance paid, record payment
-      if (advancePaid > 0) {
-        await PaymentService.recordPayment({
-          referenceType: 'ORDER',
-          referenceId: order._id,
-          entityType: 'CUSTOMER',
-          entityId: customerId,
-          amount: advancePaid,
-          paymentMode,
-          branchId,
-          recordedBy: req.user._id,
-          notes: `Advance for Custom Jewellery Order #${order.orderNo}`
-        });
+      if (advancePaid > totalEstimatedAmount) {
+        throw ApiError.badRequest('Advance cannot exceed the estimated order amount');
       }
 
-      await logAudit({
-        userId: req.user._id,
-        action: AUDIT_ACTIONS.CREATE,
-        module: 'ORDER',
-        recordId: order._id,
-        newValue: order.toObject(),
-        branchId
+      const order = await withTransaction(async (session) => {
+        const branch = await Branch.findById(branchId).select('code').session(session);
+        const orderNo = await nextDocNo('ORD', branch?.code || 'BR', session, { model: Order, field: 'orderNo' });
+
+        const doc = new Order({
+          orderNo,
+          customerId,
+          orderDate: new Date(),
+          expectedDeliveryDate,
+          items,
+          totalEstimatedAmount,
+          advancePaid: 0,
+          balanceDue: totalEstimatedAmount,
+          status: ORDER_STATUSES.CONFIRMED,
+          branchId,
+          createdBy: req.user._id,
+          notes
+        });
+        await doc.save({ session });
+
+        // the advance goes through the payment engine, which keeps order + customer ledger in step
+        if (advancePaid > 0) {
+          await PaymentService.recordPayment({
+            referenceType: 'ORDER',
+            referenceId: doc._id,
+            entityType: 'CUSTOMER',
+            entityId: customerId,
+            amount: advancePaid,
+            paymentMode,
+            branchId,
+            recordedBy: req.user._id,
+            notes: `Advance for Custom Jewellery Order #${doc.orderNo}`,
+            session
+          });
+        }
+
+        await logAudit(
+          { userId: req.user._id, action: AUDIT_ACTIONS.CREATE, module: 'ORDER', recordId: doc._id, newValue: doc.toObject(), branchId },
+          session
+        );
+        return Order.findById(doc._id).session(session);
       });
 
       return ApiResponse.created(res, 'Custom jewellery order placed successfully', order);
@@ -106,6 +121,7 @@ class OrderController {
       if (!order) {
         throw ApiError.notFound('Order not found');
       }
+      assertBranchAccess(req, order);
       return ApiResponse.success(res, 'Order details', order);
     } catch (error) {
       next(error);
@@ -124,6 +140,11 @@ class OrderController {
         throw ApiError.notFound('Order not found');
       }
 
+      assertBranchAccess(req, order);
+      const allowed = ORDER_FLOW[order.status] || [];
+      if (!allowed.includes(status)) {
+        throw ApiError.badRequest(`Order cannot move from ${order.status} to ${status}. Allowed: ${allowed.join(', ') || 'none'}`);
+      }
       const oldStatus = order.status;
       order.status = status;
       if (status === ORDER_STATUSES.DELIVERED) {

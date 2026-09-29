@@ -1,108 +1,57 @@
 const ReportService = require('../services/report.service');
+const ReconciliationService = require('../services/reconciliation.service');
 const ApiResponse = require('../utils/apiResponse');
+const ApiError = require('../utils/apiError');
+const registry = require('../config/reportRegistry');
+
+function paramsFor(def, req) {
+  const p = { branchId: req.branchId || req.query.branchId, ...(def.fixed || {}) };
+  for (const k of def.params) if (req.query[k] !== undefined) p[k] = req.query[k];
+  return p;
+}
 
 class ReportController {
-  static async getSalesReport(req, res, next) {
-    try {
-      const branchId = req.branchId || req.query.branchId;
-      const { startDate, endDate, billType, customerId } = req.query;
-
-      const report = await ReportService.getSalesReport({
-        branchId,
-        startDate,
-        endDate,
-        billType,
-        customerId
-      });
-
-      return ApiResponse.success(res, 'Sales report generated', report);
-    } catch (error) {
-      next(error);
-    }
+  static json(key) {
+    const def = registry[key];
+    return async (req, res, next) => {
+      try {
+        const report = await ReportService[def.method](paramsFor(def, req));
+        return ApiResponse.success(res, `${key} report generated`, report);
+      } catch (error) {
+        next(error);
+      }
+    };
   }
 
-  static async getStockReport(req, res, next) {
-    try {
-      const branchId = req.branchId || req.query.branchId;
-      const { metal, categoryId } = req.query;
-
-      const report = await ReportService.getInventoryReport({
-        branchId,
-        metal,
-        categoryId
-      });
-
-      return ApiResponse.success(res, 'Inventory report generated', report);
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  static async getCustomerOutstandingReport(req, res, next) {
-    try {
-      const branchId = req.branchId || req.query.branchId;
-      const report = await ReportService.getCustomerOutstandingReport({ branchId });
-      return ApiResponse.success(res, 'Customer outstanding report generated', report);
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  static async getVendorOutstandingReport(req, res, next) {
-    try {
-      const branchId = req.branchId || req.query.branchId;
-      const report = await ReportService.getVendorOutstandingReport({ branchId });
-      return ApiResponse.success(res, 'Vendor outstanding report generated', report);
-    } catch (error) {
-      next(error);
-    }
-  }
-
+  /** GET /reports/export/excel?reportType=sales|purchase|payments|... (same filters as the JSON report) */
   static async exportExcelReport(req, res, next) {
     try {
-      const { reportType } = req.query;
-      const branchId = req.branchId || req.query.branchId;
-
-      let buffer = null;
-      let filename = 'report.xlsx';
-
-      if (reportType === 'sales') {
-        const report = await ReportService.getSalesReport({ branchId });
-        const columns = [
-          { header: 'Invoice No', key: 'invoiceNo', width: 22 },
-          { header: 'Type', key: 'billType', width: 10 },
-          { header: 'Date', key: 'invoiceDate', width: 15 },
-          { header: 'Customer', key: 'customerName', width: 20 },
-          { header: 'Taxable (₹)', key: 'taxableAmount', width: 15 },
-          { header: 'Tax (₹)', key: 'taxAmount', width: 12 },
-          { header: 'Grand Total (₹)', key: 'grandTotal', width: 16 },
-          { header: 'Paid (₹)', key: 'paid', width: 14 },
-          { header: 'Due (₹)', key: 'due', width: 14 },
-          { header: 'Status', key: 'status', width: 12 }
-        ];
-        buffer = await ReportService.exportToExcel('Sales Report', columns, report.data);
-        filename = `sales_report_${Date.now()}.xlsx`;
-      } else {
-        const report = await ReportService.getInventoryReport({ branchId });
-        const columns = [
-          { header: 'Barcode', key: 'barcode', width: 20 },
-          { header: 'Product', key: 'productName', width: 25 },
-          { header: 'Category', key: 'category', width: 15 },
-          { header: 'Metal', key: 'metal', width: 12 },
-          { header: 'Purity', key: 'purity', width: 10 },
-          { header: 'Gross Wt (g)', key: 'grossWeight', width: 14 },
-          { header: 'Net Wt (g)', key: 'netWeight', width: 14 },
-          { header: 'Quantity', key: 'quantity', width: 10 },
-          { header: 'Cost Price (₹)', key: 'costPrice', width: 15 },
-          { header: 'Location', key: 'location', width: 15 }
-        ];
-        buffer = await ReportService.exportToExcel('Inventory Report', columns, report.data);
-        filename = `inventory_report_${Date.now()}.xlsx`;
+      const key = req.query.reportType === 'inventory' ? 'stock' : req.query.reportType || 'sales';
+      const def = registry[key];
+      if (!def) {
+        throw ApiError.badRequest(`Unknown reportType '${key}'. Available: ${Object.keys(registry).join(', ')}`);
+      }
+      const role = req.user?.roleId?.name || req.user?.role;
+      if (role !== 'SUPER_ADMIN' && !def.roles.includes(role)) {
+        throw ApiError.forbidden(`Role '${role}' cannot export ${key}`);
       }
 
+      const report = await ReportService[def.method](paramsFor(def, req));
+      const rows = key === 'profit-loss' ? [report.summary] : report.data;
+      const buffer = await ReportService.exportToExcel(key, def.columns, rows);
+
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+      res.setHeader('Content-Disposition', `attachment; filename=${key}_report_${Date.now()}.xlsx`);
       return res.send(buffer);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async reconciliation(req, res, next) {
+    try {
+      const result = await ReconciliationService.run({ branchId: req.branchId || req.query.branchId, fix: req.query.fix === 'true' });
+      return ApiResponse.success(res, result.ok ? 'Books are consistent' : 'Inconsistencies found', result);
     } catch (error) {
       next(error);
     }

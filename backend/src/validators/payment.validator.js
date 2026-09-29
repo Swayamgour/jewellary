@@ -7,7 +7,7 @@ const paymentSchema = Joi.object({
   entityType: Joi.string().valid('CUSTOMER', 'VENDOR').required(),
   entityId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).required(),
   amount: Joi.number().positive().required(),
-  paymentMode: Joi.string().valid(...Object.values(PAYMENT_MODES)).required(),
+  paymentMode: Joi.string().valid(...Object.values(PAYMENT_MODES).filter((m) => m !== 'EXCHANGE')).required(),
   modeDetails: Joi.object({
     transactionId: Joi.string().allow('', null),
     upiId: Joi.string().allow('', null),

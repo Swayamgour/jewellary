@@ -13,7 +13,7 @@ const customerLedgerSchema = new mongoose.Schema(
     },
     entryType: {
       type: String,
-      enum: ['SALE', 'PAYMENT', 'RETURN', 'EXCHANGE', 'OPENING', 'ADJUSTMENT'],
+      enum: ['SALE', 'PAYMENT', 'RETURN', 'EXCHANGE', 'OPENING', 'ADJUSTMENT', 'REFUND', 'CANCELLATION'],
       required: true
     },
     referenceType: {

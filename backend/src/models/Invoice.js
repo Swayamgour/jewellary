@@ -8,6 +8,10 @@ const invoiceItemSchema = new mongoose.Schema(
       ref: 'Product',
       required: true
     },
+    inventoryId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Inventory'
+    },
     barcode: {
       type: String,
       uppercase: true,
@@ -100,22 +104,58 @@ const invoiceItemSchema = new mongoose.Schema(
       default: 0,
       min: 0
     },
+    // Line value after item discount (before the invoice-level discount)
     taxableAmount: {
       type: Number,
       required: true,
+      min: 0
+    },
+    // Line value after its share of the invoice-level discount - the base GST is charged on
+    effectiveTaxableAmount: {
+      type: Number,
+      default: 0,
       min: 0
     },
     taxRate: {
       type: Number,
       default: 0
     },
+    // This line's share of the invoice GST
     taxAmount: {
       type: Number,
       default: 0
     },
+    // effectiveTaxableAmount + taxAmount (what the customer effectively pays for the line)
     totalAmount: {
       type: Number,
       required: true,
+      min: 0
+    },
+    // Cost snapshot taken from inventory at sale time (drives real gross profit)
+    unitCost: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    costAmount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    // Sales-return tracking (prevents duplicate / excess returns)
+    returnedQty: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    returnedTaxable: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    returnedTax: {
+      type: Number,
+      default: 0,
       min: 0
     }
   },
@@ -169,7 +209,14 @@ const invoiceSchema = new mongoose.Schema(
       required: true,
       min: 0
     },
+    // Total discount = sum(item discounts) + extraDiscount
     discount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    // Invoice-level discount only (needed to recompute GST correctly on Kacha -> Pakka)
+    extraDiscount: {
       type: Number,
       default: 0,
       min: 0
@@ -198,10 +245,41 @@ const invoiceSchema = new mongoose.Schema(
       required: true,
       min: 0
     },
+    // Derived from Payment documents by InvoiceAccounting.recompute() - never edited by hand.
     paymentSummary: {
-      paid: { type: Number, default: 0, min: 0 },
-      due: { type: Number, default: 0, min: 0 },
-      exchangeAdjusted: { type: Number, default: 0, min: 0 }
+      paid: { type: Number, default: 0, min: 0 }, // total received (incl. old-gold adjustments)
+      due: { type: Number, default: 0, min: 0 }, // still receivable after returns
+      exchangeAdjusted: { type: Number, default: 0, min: 0 },
+      refunded: { type: Number, default: 0, min: 0 }, // money paid back to the customer
+      netPayable: { type: Number, default: 0, min: 0 }, // grandTotal - returnedAmount
+      excessReceived: { type: Number, default: 0, min: 0 } // received beyond netPayable (customer credit)
+    },
+    returnedAmount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    returnedTaxable: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    returnStatus: {
+      type: String,
+      enum: ['NONE', 'PARTIAL', 'FULL'],
+      default: 'NONE'
+    },
+    confirmedAt: {
+      type: Date
+    },
+    convertedAt: {
+      type: Date
+    },
+    cancellationSummary: {
+      paymentAction: { type: String, enum: ['REFUND', 'CREDIT', 'NONE'] },
+      receivableReversed: { type: Number, default: 0 },
+      cashRefunded: { type: Number, default: 0 },
+      creditRetained: { type: Number, default: 0 }
     },
     status: {
       type: String,
@@ -238,15 +316,20 @@ const invoiceSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true
+    timestamps: true,
+    optimisticConcurrency: true
   }
 );
 
 // Indexes
+// A Kacha bill can be converted at most once, and a Pakka bill can originate from at most one Kacha bill
+invoiceSchema.index({ convertedFromKachaBillId: 1 }, { unique: true, sparse: true });
+invoiceSchema.index({ convertedToPakkaBillId: 1 }, { unique: true, sparse: true });
 invoiceSchema.index({ billType: 1, status: 1 });
 invoiceSchema.index({ customerId: 1, invoiceDate: -1 });
 invoiceSchema.index({ branchId: 1, invoiceDate: -1 });
 invoiceSchema.index({ paymentStatus: 1 });
+invoiceSchema.index({ status: 1, invoiceDate: -1 });
 invoiceSchema.index({ 'items.barcode': 1 });
 
 module.exports = mongoose.model('Invoice', invoiceSchema);

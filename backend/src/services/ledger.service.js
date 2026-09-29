@@ -5,10 +5,17 @@ const VendorLedger = require('../models/VendorLedger');
 const DecimalUtil = require('../utils/decimal');
 const ApiError = require('../utils/apiError');
 
+/**
+ * Ledger postings.
+ *
+ * The party balance is moved with an atomic $inc and the resulting balance is read back from the
+ * same operation, so two requests posting at the same moment can never overwrite each other's
+ * balance (the previous read-modify-write version could).
+ *
+ *   Customer:  balance > 0  => customer owes the shop   | balance < 0 => shop owes the customer (credit)
+ *   Vendor:    balance > 0  => shop owes the vendor     | balance < 0 => vendor owes the shop (advance)
+ */
 class LedgerService {
-  /**
-   * Post entry to Customer Ledger
-   */
   static async postCustomerEntry({
     customerId,
     entryType,
@@ -21,15 +28,19 @@ class LedgerService {
     createdBy,
     session = null
   }) {
-    const customer = await Customer.findById(customerId).session(session);
+    debit = DecimalUtil.roundCurrency(debit);
+    credit = DecimalUtil.roundCurrency(credit);
+    const delta = DecimalUtil.subtract(debit, credit);
+
+    const customer = await Customer.findOneAndUpdate(
+      { _id: customerId },
+      { $inc: { currentBalance: delta } },
+      { new: true, session }
+    );
     if (!customer) {
       throw ApiError.notFound('Customer not found for ledger entry');
     }
-
-    const prevBalance = customer.currentBalance || 0;
-    // Debit increases receivable (customer owes us money)
-    // Credit decreases receivable (payment, return, exchange)
-    const newBalance = DecimalUtil.add(DecimalUtil.subtract(DecimalUtil.add(prevBalance, debit), credit));
+    const newBalance = DecimalUtil.roundCurrency(customer.currentBalance);
 
     const ledgerEntry = new CustomerLedger({
       customerId,
@@ -37,25 +48,17 @@ class LedgerService {
       referenceType,
       referenceId,
       description,
-      debit: DecimalUtil.roundCurrency(debit),
-      credit: DecimalUtil.roundCurrency(credit),
+      debit,
+      credit,
       runningBalance: newBalance,
       branchId,
       createdBy,
       transactionDate: new Date()
     });
-
     await ledgerEntry.save({ session });
-
-    customer.currentBalance = newBalance;
-    await customer.save({ session });
-
     return ledgerEntry;
   }
 
-  /**
-   * Post entry to Vendor Ledger
-   */
   static async postVendorEntry({
     vendorId,
     entryType,
@@ -68,15 +71,19 @@ class LedgerService {
     createdBy,
     session = null
   }) {
-    const vendor = await Vendor.findById(vendorId).session(session);
+    debit = DecimalUtil.roundCurrency(debit);
+    credit = DecimalUtil.roundCurrency(credit);
+    const delta = DecimalUtil.subtract(credit, debit);
+
+    const vendor = await Vendor.findOneAndUpdate(
+      { _id: vendorId },
+      { $inc: { currentBalance: delta } },
+      { new: true, session }
+    );
     if (!vendor) {
       throw ApiError.notFound('Vendor not found for ledger entry');
     }
-
-    const prevBalance = vendor.currentBalance || 0;
-    // Credit increases payable (we owe vendor)
-    // Debit decreases payable (we paid vendor, or returned goods)
-    const newBalance = DecimalUtil.add(DecimalUtil.subtract(DecimalUtil.add(prevBalance, credit), debit));
+    const newBalance = DecimalUtil.roundCurrency(vendor.currentBalance);
 
     const ledgerEntry = new VendorLedger({
       vendorId,
@@ -84,19 +91,14 @@ class LedgerService {
       referenceType,
       referenceId,
       description,
-      debit: DecimalUtil.roundCurrency(debit),
-      credit: DecimalUtil.roundCurrency(credit),
+      debit,
+      credit,
       runningBalance: newBalance,
       branchId,
       createdBy,
       transactionDate: new Date()
     });
-
     await ledgerEntry.save({ session });
-
-    vendor.currentBalance = newBalance;
-    await vendor.save({ session });
-
     return ledgerEntry;
   }
 }

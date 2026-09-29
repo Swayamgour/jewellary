@@ -1,5 +1,7 @@
 # 💎 Jewellery ERP — Production Backend
 
+> **v2** — accounting hardening, Purchase Orders, full reports. See [CHANGES-v2.md](CHANGES-v2.md) for the new flows, migration steps and breaking API changes.
+
 A complete, production-grade ERP, POS, Jewellery Management, Inventory, Billing, Accounting, and Retail Backend built with **Node.js**, **Express.js**, **MongoDB**, and **Mongoose**.
 
 ---

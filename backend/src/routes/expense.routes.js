@@ -5,7 +5,7 @@ const authenticate = require('../middleware/auth.middleware');
 const resolveBranch = require('../middleware/branch.middleware');
 const validate = require('../middleware/validate.middleware');
 const { authorizeRoles } = require('../middleware/role.middleware');
-const { expenseSchema } = require('../validators/inventory.validator');
+const { expenseSchema, expenseUpdateSchema } = require('../validators/inventory.validator');
 const { ROLES } = require('../config/constants');
 
 router.use(authenticate, resolveBranch);
@@ -13,7 +13,7 @@ router.use(authenticate, resolveBranch);
 router.post('/', validate(expenseSchema), ExpenseController.createExpense);
 router.get('/', ExpenseController.getExpenses);
 router.get('/:id', ExpenseController.getExpenseById);
-router.put('/:id', ExpenseController.updateExpense);
+router.put('/:id', validate(expenseUpdateSchema), ExpenseController.updateExpense);
 router.delete('/:id', authorizeRoles(ROLES.SUPER_ADMIN, ROLES.ADMIN), ExpenseController.deleteExpense);
 
 module.exports = router;

@@ -11,10 +11,14 @@ const GoldRate = require('../models/GoldRate');
 const Inventory = require('../models/Inventory');
 const Customer = require('../models/Customer');
 const Vendor = require('../models/Vendor');
-const BarcodeGenerator = require('../utils/barcodeGenerator');
+const Counter = require('../models/Counter');
 
 const seedDatabase = async () => {
   try {
+    if (env.IS_PROD && !process.argv.includes('--force')) {
+      console.error('[Seeder] Refusing to WIPE a production database. Re-run with --force if you really mean it.');
+      process.exit(1);
+    }
     console.log('[Seeder] Connecting to MongoDB...');
     await mongoose.connect(env.MONGO_URI);
     console.log('[Seeder] Connected.');
@@ -30,7 +34,8 @@ const seedDatabase = async () => {
       GoldRate.deleteMany({}),
       Inventory.deleteMany({}),
       Customer.deleteMany({}),
-      Vendor.deleteMany({})
+      Vendor.deleteMany({}),
+      Counter.deleteMany({})
     ]);
 
     // 1. Seed Permissions

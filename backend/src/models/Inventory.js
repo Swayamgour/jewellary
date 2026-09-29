@@ -32,6 +32,8 @@ const inventorySchema = new mongoose.Schema(
       required: true,
       default: PURITIES.GOLD_22K
     },
+    // NOTE: grossWeight / stoneWeight / netWeight are PER UNIT (per piece).
+    // Real stock weight = per-unit weight x quantity  (see totalNetWeight / totalGrossWeight virtuals).
     grossWeight: {
       type: Number,
       required: [true, 'Gross weight is required'],
@@ -52,6 +54,7 @@ const inventorySchema = new mongoose.Schema(
       default: 1,
       min: [0, 'Stock quantity cannot be negative']
     },
+    // Landed cost of ONE unit (metal + making + other charges, excluding recoverable GST)
     costPrice: {
       type: Number,
       default: 0,
@@ -105,11 +108,24 @@ const inventorySchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
   }
 );
 
+inventorySchema.virtual('totalNetWeight').get(function () {
+  return Math.round((this.netWeight || 0) * (this.quantity || 0) * 1000) / 1000;
+});
+inventorySchema.virtual('totalGrossWeight').get(function () {
+  return Math.round((this.grossWeight || 0) * (this.quantity || 0) * 1000) / 1000;
+});
+inventorySchema.virtual('totalCost').get(function () {
+  return Math.round((this.costPrice || 0) * (this.quantity || 0) * 100) / 100;
+});
+
 inventorySchema.index({ branchId: 1, status: 1 });
+inventorySchema.index({ branchId: 1, productId: 1, status: 1, quantity: 1 });
 inventorySchema.index({ productId: 1, branchId: 1 });
 inventorySchema.index({ metal: 1, purity: 1 });
 inventorySchema.index({ isDeleted: 1 });

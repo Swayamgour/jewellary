@@ -27,6 +27,16 @@ const errorHandler = (err, req, res, next) => {
     error = ApiError.unprocessableEntity('Database validation failed', 'MONGO_VALIDATION_ERROR', details);
   }
 
+  // Malformed JSON body
+  if (err.type === 'entity.parse.failed') {
+    error = ApiError.badRequest('Request body is not valid JSON', 'INVALID_JSON');
+  }
+
+  // Concurrent edit of the same document (optimistic concurrency) / transaction write conflicts
+  if (err.name === 'VersionError' || err.hasErrorLabel?.('TransientTransactionError') || err.codeName === 'WriteConflict') {
+    error = ApiError.conflict('This record was changed by someone else at the same time. Please reload and try again.', 'CONCURRENT_MODIFICATION');
+  }
+
   // Handle JWT errors
   if (err.name === 'JsonWebTokenError') {
     error = ApiError.unauthorized('Invalid authentication token', 'INVALID_TOKEN');

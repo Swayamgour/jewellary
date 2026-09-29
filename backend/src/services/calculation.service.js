@@ -1,4 +1,6 @@
 const DecimalUtil = require('../utils/decimal');
+const ApiError = require('../utils/apiError');
+const { allocateByShare } = require('../utils/accounting');
 const { MAKING_CHARGE_TYPES, GST_RATES } = require('../config/constants');
 
 class CalculationService {
@@ -12,7 +14,7 @@ class CalculationService {
     const stoneWeight = DecimalUtil.roundWeight(item.stoneWeight || 0);
 
     if (grossWeight < stoneWeight) {
-      throw new Error(`Gross weight (${grossWeight}g) cannot be less than stone weight (${stoneWeight}g)`);
+      throw ApiError.badRequest(`Gross weight (${grossWeight}g) cannot be less than stone weight (${stoneWeight}g)`);
     }
 
     const netWeight = DecimalUtil.subtract(grossWeight, stoneWeight);
@@ -90,7 +92,7 @@ class CalculationService {
     extraDiscount = 0
   }) {
     if (!items || items.length === 0) {
-      throw new Error('Invoice must contain at least one item');
+      throw ApiError.badRequest('Invoice must contain at least one item');
     }
 
     let subtotal = 0;
@@ -104,6 +106,15 @@ class CalculationService {
       totalTaxable = DecimalUtil.add(totalTaxable, calculated.taxableAmount);
       return calculated;
     });
+
+    extraDiscount = DecimalUtil.roundCurrency(extraDiscount || 0);
+    if (extraDiscount < 0) {
+      throw ApiError.badRequest('Invoice discount cannot be negative');
+    }
+    const afterItemDiscount = DecimalUtil.subtract(subtotal, itemsDiscount);
+    if (extraDiscount > afterItemDiscount) {
+      throw ApiError.badRequest(`Invoice discount (${extraDiscount}) cannot exceed the amount after item discounts (${afterItemDiscount})`);
+    }
 
     const totalDiscount = DecimalUtil.add(itemsDiscount, extraDiscount);
     const finalTaxableAmount = Math.max(0, DecimalUtil.subtract(subtotal, totalDiscount));
@@ -137,12 +148,28 @@ class CalculationService {
       }
     }
 
+    // Allocate the invoice-level discount and the GST across lines, so that partial
+    // sales returns / credit notes can be valued exactly later on.
+    const lineTaxables = calculatedItems.map((i) => i.taxableAmount);
+    const discountShares = allocateByShare(extraDiscount, lineTaxables);
+    const effectiveTaxables = calculatedItems.map((i, idx) => Math.max(0, DecimalUtil.subtract(i.taxableAmount, discountShares[idx])));
+    const taxShares = allocateByShare(tax.totalTax, effectiveTaxables);
+    const totalTaxRate = DecimalUtil.add(tax.cgstRate, tax.sgstRate, tax.igstRate);
+
+    calculatedItems.forEach((line, idx) => {
+      line.effectiveTaxableAmount = effectiveTaxables[idx];
+      line.taxRate = totalTaxRate;
+      line.taxAmount = taxShares[idx];
+      line.totalAmount = DecimalUtil.add(effectiveTaxables[idx], taxShares[idx]);
+    });
+
     const preRoundGrandTotal = DecimalUtil.add(finalTaxableAmount, tax.totalTax);
     const { roundedAmount, roundOffDiff } = DecimalUtil.roundToRupee(preRoundGrandTotal);
 
     return {
       items: calculatedItems,
       subtotal,
+      extraDiscount,
       discount: totalDiscount,
       taxableAmount: finalTaxableAmount,
       tax,

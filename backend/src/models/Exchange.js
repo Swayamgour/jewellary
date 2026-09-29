@@ -104,11 +104,28 @@ const exchangeSchema = new mongoose.Schema(
       required: true,
       min: 0
     },
+    // PENDING_ADJUSTMENT   : old gold received, value sits as customer credit
+    // PARTIALLY_ADJUSTED   : part of the value used on a bill, rest still credit
+    // ADJUSTED_IN_BILL     : fully used against a bill
+    // PAID_OUT             : remaining value paid to the customer
     status: {
       type: String,
-      enum: ['PENDING_ADJUSTMENT', 'ADJUSTED_IN_BILL', 'PAID_OUT', 'CANCELLED'],
+      enum: ['PENDING_ADJUSTMENT', 'PARTIALLY_ADJUSTED', 'ADJUSTED_IN_BILL', 'PAID_OUT', 'CANCELLED'],
       default: 'PENDING_ADJUSTMENT'
     },
+    // Value already used against invoices / paid out
+    adjustedAmount: { type: Number, default: 0, min: 0 },
+    // Every bill the old-gold value was used against (an exchange may be split over several bills)
+    adjustments: [
+      {
+        invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice' },
+        amount: { type: Number, required: true, min: 0 },
+        paymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment' },
+        at: { type: Date, default: Date.now }
+      }
+    ],
+    paidOutAmount: { type: Number, default: 0, min: 0 },
+    payoutPaymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment' },
     invoiceId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Invoice'

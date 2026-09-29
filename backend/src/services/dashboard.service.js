@@ -8,7 +8,9 @@ const Inventory = require('../models/Inventory');
 const Expense = require('../models/Expense');
 const Order = require('../models/Order');
 const DecimalUtil = require('../utils/decimal');
-const { INVOICE_STATUSES, INVENTORY_STATUSES } = require('../config/constants');
+const ProfitService = require('./profit.service');
+const SalesReturn = require('../models/SalesReturn');
+const { LIVE_INVOICE_STATUSES, INVENTORY_STATUSES } = require('../config/constants');
 
 class DashboardService {
   /**
@@ -57,164 +59,88 @@ class DashboardService {
 
     const branchMatch = branchId ? { branchId: new mongoose.Types.ObjectId(branchId) } : {};
 
-    // 1. Sales Aggregations
-    const salesAggregate = await Invoice.aggregate([
-      {
-        $match: {
-          ...branchMatch,
-          invoiceDate: { $gte: start, $lte: end },
-          status: { $nin: [INVOICE_STATUSES.CANCELLED, INVOICE_STATUSES.DRAFT] }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalSales: { $sum: '$grandTotal' },
-          totalTaxable: { $sum: '$taxableAmount' },
-          totalTax: { $sum: '$tax.totalTax' },
-          kachaSales: {
-            $sum: {
-              $cond: [{ $eq: ['$billType', 'KACHA'] }, '$grandTotal', 0]
-            }
-          },
-          pakkaSales: {
-            $sum: {
-              $cond: [{ $eq: ['$billType', 'PAKKA'] }, '$grandTotal', 0]
-            }
-          },
-          totalInvoicesCount: { $sum: 1 }
-        }
-      }
-    ]);
+    // 1. Sales (live invoices only: CONVERTED Kacha bills are excluded, the Pakka invoice carries the sale)
+    const liveInvoices = await Invoice.find({
+      ...branchMatch,
+      invoiceDate: { $gte: start, $lte: end },
+      status: { $in: LIVE_INVOICE_STATUSES }
+    })
+      .select('billType grandTotal taxableAmount tax.totalTax')
+      .lean();
 
-    const salesStats = salesAggregate[0] || {
-      totalSales: 0,
-      totalTaxable: 0,
-      totalTax: 0,
-      kachaSales: 0,
-      pakkaSales: 0,
-      totalInvoicesCount: 0
-    };
-
-    // 2. Purchases Aggregation
-    const purchaseAggregate = await Purchase.aggregate([
-      {
-        $match: {
-          ...branchMatch,
-          purchaseDate: { $gte: start, $lte: end },
-          status: 'COMPLETED'
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalPurchase: { $sum: '$grandTotal' },
-          totalPurchasesCount: { $sum: 1 }
-        }
-      }
-    ]);
-
-    const purchaseStats = purchaseAggregate[0] || { totalPurchase: 0, totalPurchasesCount: 0 };
-
-    // 3. Payment Collections by Mode
-    const paymentAggregate = await Payment.aggregate([
-      {
-        $match: {
-          ...branchMatch,
-          paymentDate: { $gte: start, $lte: end },
-          status: 'SUCCESS',
-          entityType: 'CUSTOMER'
-        }
-      },
-      {
-        $group: {
-          _id: '$paymentMode',
-          total: { $sum: '$amount' }
-        }
-      }
-    ]);
-
-    const collectionsByMode = {
-      CASH: 0,
-      UPI: 0,
-      CARD: 0,
-      BANK_TRANSFER: 0,
-      CHEQUE: 0,
-      EXCHANGE: 0,
-      TOTAL: 0
-    };
-
-    paymentAggregate.forEach((p) => {
-      collectionsByMode[p._id] = DecimalUtil.roundCurrency(p.total);
-      collectionsByMode.TOTAL = DecimalUtil.add(collectionsByMode.TOTAL, p.total);
+    const salesStats = { totalSales: 0, totalTaxable: 0, totalTax: 0, kachaSales: 0, pakkaSales: 0, totalInvoicesCount: liveInvoices.length };
+    liveInvoices.forEach((inv) => {
+      salesStats.totalSales += inv.grandTotal || 0;
+      salesStats.totalTaxable += inv.taxableAmount || 0;
+      salesStats.totalTax += inv.tax?.totalTax || 0;
+      if (inv.billType === 'KACHA') salesStats.kachaSales += inv.grandTotal || 0;
+      else salesStats.pakkaSales += inv.grandTotal || 0;
     });
 
-    // 4. Receivables & Payables
-    const customerBalanceAgg = await Customer.aggregate([
-      { $match: { isDeleted: false, ...branchMatch } },
-      { $group: { _id: null, totalReceivable: { $sum: '$currentBalance' } } }
-    ]);
-    const totalCustomerReceivable = customerBalanceAgg[0]?.totalReceivable || 0;
+    // 2. Purchases
+    const purchases = await Purchase.find({ ...branchMatch, purchaseDate: { $gte: start, $lte: end }, status: 'COMPLETED' })
+      .select('grandTotal returnedAmount')
+      .lean();
+    const purchaseStats = {
+      totalPurchase: purchases.reduce((a, p) => a + (p.grandTotal || 0), 0),
+      totalReturned: purchases.reduce((a, p) => a + (p.returnedAmount || 0), 0),
+      totalPurchasesCount: purchases.length
+    };
 
-    const vendorBalanceAgg = await Vendor.aggregate([
-      { $match: { isDeleted: false, ...branchMatch } },
-      { $group: { _id: null, totalPayable: { $sum: '$currentBalance' } } }
-    ]);
-    const totalVendorPayable = vendorBalanceAgg[0]?.totalPayable || 0;
+    // 3. Customer collections by mode (receipts minus refunds; old-gold adjustments are not cash)
+    const customerPayments = await Payment.find({
+      ...branchMatch,
+      paymentDate: { $gte: start, $lte: end },
+      status: 'SUCCESS',
+      entityType: 'CUSTOMER'
+    }).select('amount paymentMode direction');
 
-    // 5. Inventory Stock Valuation & Quantities
-    const inventoryStockAgg = await Inventory.aggregate([
-      {
-        $match: {
-          ...branchMatch,
-          isDeleted: false,
-          status: INVENTORY_STATUSES.AVAILABLE
-        }
-      },
-      {
-        $group: {
-          _id: '$metal',
-          totalQty: { $sum: '$quantity' },
-          totalGrossWeight: { $sum: '$grossWeight' },
-          totalNetWeight: { $sum: '$netWeight' },
-          totalCostValue: { $sum: '$costPrice' }
-        }
+    const collectionsByMode = { CASH: 0, UPI: 0, CARD: 0, BANK_TRANSFER: 0, CHEQUE: 0, OTHER: 0, EXCHANGE: 0, TOTAL: 0, REFUNDS: 0 };
+    customerPayments.forEach((p) => {
+      if (p.paymentMode === 'EXCHANGE') {
+        if (p.direction === 'IN') collectionsByMode.EXCHANGE = DecimalUtil.add(collectionsByMode.EXCHANGE, p.amount);
+        return;
       }
-    ]);
+      if (p.direction === 'IN') {
+        collectionsByMode[p.paymentMode] = DecimalUtil.add(collectionsByMode[p.paymentMode] || 0, p.amount);
+        collectionsByMode.TOTAL = DecimalUtil.add(collectionsByMode.TOTAL, p.amount);
+      } else {
+        collectionsByMode.REFUNDS = DecimalUtil.add(collectionsByMode.REFUNDS, p.amount);
+      }
+    });
+    collectionsByMode.NET = DecimalUtil.subtract(collectionsByMode.TOTAL, collectionsByMode.REFUNDS);
+
+    // 4. Receivables & Payables (party balances)
+    const custs = await Customer.find({ isDeleted: false, ...branchMatch }).select('currentBalance').lean();
+    const totalCustomerReceivable = custs.reduce((a, c) => a + (c.currentBalance || 0), 0);
+    const vends = await Vendor.find({ isDeleted: false, ...branchMatch }).select('currentBalance').lean();
+    const totalVendorPayable = vends.reduce((a, v) => a + (v.currentBalance || 0), 0);
+
+    // 5. Inventory valuation. Weights on a stock row are PER UNIT, so totals are unit x quantity.
+    const stockRows = await Inventory.find({
+      ...branchMatch,
+      isDeleted: false,
+      status: INVENTORY_STATUSES.AVAILABLE,
+      quantity: { $gt: 0 }
+    }).select('metal quantity netWeight costPrice');
 
     const stockSummary = {
       GOLD: { qty: 0, netWeight: 0, costValue: 0 },
       SILVER: { qty: 0, netWeight: 0, costValue: 0 },
+      PLATINUM: { qty: 0, netWeight: 0, costValue: 0 },
       DIAMOND: { qty: 0, netWeight: 0, costValue: 0 },
       OTHER: { qty: 0, netWeight: 0, costValue: 0 }
     };
-
-    inventoryStockAgg.forEach((s) => {
-      if (stockSummary[s._id]) {
-        stockSummary[s._id] = {
-          qty: s.totalQty,
-          netWeight: DecimalUtil.roundWeight(s.totalNetWeight),
-          costValue: DecimalUtil.roundCurrency(s.totalCostValue)
-        };
-      }
+    stockRows.forEach((row) => {
+      const b = stockSummary[row.metal] || stockSummary.OTHER;
+      b.qty += row.quantity;
+      b.netWeight = DecimalUtil.roundWeight(b.netWeight + row.netWeight * row.quantity);
+      b.costValue = DecimalUtil.roundCurrency(b.costValue + row.costPrice * row.quantity);
     });
 
     // 6. Operating Expenses
-    const expenseAgg = await Expense.aggregate([
-      {
-        $match: {
-          ...branchMatch,
-          expenseDate: { $gte: start, $lte: end }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalExpense: { $sum: '$amount' }
-        }
-      }
-    ]);
-    const totalExpense = expenseAgg[0]?.totalExpense || 0;
+    const expenseRows = await Expense.find({ ...branchMatch, expenseDate: { $gte: start, $lte: end } }).select('amount').lean();
+    const totalExpense = expenseRows.reduce((a, e) => a + (e.amount || 0), 0);
 
     // 7. Pending Custom Orders
     const pendingOrdersCount = await Order.countDocuments({
@@ -225,16 +151,14 @@ class DashboardService {
     // 8. Recent Invoices
     const recentInvoices = await Invoice.find({
       ...branchMatch,
-      status: { $ne: INVOICE_STATUSES.CANCELLED }
+      status: { $in: LIVE_INVOICE_STATUSES }
     })
       .sort({ invoiceDate: -1 })
       .limit(5)
       .select('invoiceNo billType invoiceDate customerSnapshot grandTotal paymentStatus status');
 
-    // 9. True Profit Computation:
-    // Net Revenue (Taxable Sales - Discounts) minus Expenses
-    const grossRevenue = DecimalUtil.roundCurrency(salesStats.totalTaxable || 0);
-    const estimatedNetProfit = DecimalUtil.subtract(grossRevenue, totalExpense);
+    // 9. Profit: net sales - cost of goods sold - expenses (see ProfitService)
+    const profit = await ProfitService.compute({ branchId, start, end });
 
     return {
       period: {
@@ -252,6 +176,8 @@ class DashboardService {
       },
       purchases: {
         totalPurchase: DecimalUtil.roundCurrency(purchaseStats.totalPurchase),
+        purchaseReturns: DecimalUtil.roundCurrency(purchaseStats.totalReturned || 0),
+        netPurchase: DecimalUtil.subtract(purchaseStats.totalPurchase, purchaseStats.totalReturned || 0),
         purchaseCount: purchaseStats.totalPurchasesCount
       },
       collections: collectionsByMode,
@@ -261,8 +187,14 @@ class DashboardService {
       },
       inventory: stockSummary,
       financials: {
+        netSales: profit.netSales,
+        salesReturns: profit.salesReturns,
+        costOfGoodsSold: profit.costOfGoodsSold,
+        grossProfit: profit.grossProfit,
         totalExpenses: DecimalUtil.roundCurrency(totalExpense),
-        estimatedNetProfit: DecimalUtil.roundCurrency(estimatedNetProfit)
+        netProfit: profit.netProfit,
+        estimatedNetProfit: profit.netProfit, // kept for existing clients
+        profitNote: profit.note
       },
       pendingOrdersCount,
       recentInvoices

@@ -18,6 +18,26 @@ const paymentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       required: false
     },
+    // IN  = money received by the shop   (customer receipt, vendor refund)
+    // OUT = money paid by the shop       (vendor payment, customer refund)
+    direction: {
+      type: String,
+      enum: ['IN', 'OUT'],
+      required: true
+    },
+    // Set when the payment exists because of another document (sales return, cancellation, ...)
+    linkedDocType: {
+      type: String,
+      enum: ['SALES_RETURN', 'PURCHASE_RETURN', 'INVOICE_CANCELLATION', 'PURCHASE_CANCELLATION', 'EXCHANGE', null],
+      default: null
+    },
+    linkedDocId: {
+      type: mongoose.Schema.Types.ObjectId
+    },
+    // Kacha -> Pakka conversion re-points payments; keep the trail
+    transferredFromId: {
+      type: mongoose.Schema.Types.ObjectId
+    },
     entityType: {
       type: String,
       enum: ['CUSTOMER', 'VENDOR'],
@@ -86,9 +106,19 @@ const paymentSchema = new mongoose.Schema(
   }
 );
 
+// Older documents (and callers that only pass entityType) get the natural direction
+paymentSchema.pre('validate', function (next) {
+  if (!this.direction && this.entityType) {
+    this.direction = this.entityType === 'CUSTOMER' ? 'IN' : 'OUT';
+  }
+  next();
+});
+
 paymentSchema.index({ referenceId: 1, referenceType: 1 });
 paymentSchema.index({ entityId: 1, entityType: 1, paymentDate: -1 });
 paymentSchema.index({ branchId: 1, paymentDate: -1 });
 paymentSchema.index({ paymentMode: 1 });
+paymentSchema.index({ status: 1, direction: 1, paymentDate: -1 });
+paymentSchema.index({ linkedDocType: 1, linkedDocId: 1 });
 
 module.exports = mongoose.model('Payment', paymentSchema);

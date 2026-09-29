@@ -1,14 +1,77 @@
+const escapeRegex = require('../utils/escapeRegex');
 const Invoice = require('../models/Invoice');
+const Payment = require('../models/Payment');
+const SalesReturn = require('../models/SalesReturn');
 const BillingService = require('../services/billing.service');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
+const { assertBranchAccess, guardBranch } = require('../utils/branchScope');
 const { BILL_TYPES, INVOICE_STATUSES } = require('../config/constants');
 
 class BillingController {
+  // --- UNIFIED REGISTER (Kacha + Pakka, every status) ---
+  static async listInvoices(req, res, next) {
+    try {
+      const page = parseInt(req.query.page || 1, 10);
+      const limit = Math.min(parseInt(req.query.limit || 20, 10), 200);
+      const skip = (page - 1) * limit;
+
+      const query = {};
+      if (req.branchId) query.branchId = req.branchId;
+      if (req.query.billType) query.billType = req.query.billType;
+      if (req.query.status) query.status = req.query.status;
+      if (req.query.paymentStatus) query.paymentStatus = req.query.paymentStatus;
+      if (req.query.customerId) query.customerId = req.query.customerId;
+      if (req.query.dueOnly === 'true') {
+        query.status = query.status || 'CONFIRMED';
+        query['paymentSummary.due'] = { $gt: 0 };
+      }
+      if (req.query.search) {
+        const rx = { $regex: escapeRegex(req.query.search), $options: 'i' };
+        query.$or = [{ invoiceNo: rx }, { 'customerSnapshot.name': rx }, { 'customerSnapshot.mobile': rx }];
+      }
+
+      const [bills, total] = await Promise.all([
+        Invoice.find(query).sort({ invoiceDate: -1, createdAt: -1 }).skip(skip).limit(limit),
+        Invoice.countDocuments(query)
+      ]);
+
+      return ApiResponse.success(res, 'Invoices fetched', bills, 200, { page, limit, total, totalPages: Math.ceil(total / limit) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // --- ONE INVOICE (any type / status) with its payments and sales returns ---
+  static async getInvoiceById(req, res, next) {
+    try {
+      const invoice = await Invoice.findById(req.params.id)
+        .populate('customerId')
+        .populate('branchId')
+        .populate('createdBy', 'name')
+        .populate('convertedFromKachaBillId', 'invoiceNo invoiceDate grandTotal')
+        .populate('convertedToPakkaBillId', 'invoiceNo invoiceDate grandTotal');
+      if (!invoice) throw ApiError.notFound('Invoice not found');
+      assertBranchAccess(req, invoice);
+
+      const [payments, salesReturns] = await Promise.all([
+        Payment.find({ referenceType: 'INVOICE', referenceId: invoice._id }).sort({ paymentDate: 1 }).populate('recordedBy', 'name'),
+        SalesReturn.find({ invoiceId: invoice._id }).sort({ returnDate: -1 })
+      ]);
+
+      const data = invoice.toObject();
+      data.payments = payments;
+      data.salesReturns = salesReturns;
+      return ApiResponse.success(res, 'Invoice details', data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // --- KACHA BILLS ---
   static async createKachaBill(req, res, next) {
     try {
-      const { customerId, items, discount = 0, payments = [], notes } = req.body;
+      const { customerId, items, discount = 0, payments = [], notes, status = INVOICE_STATUSES.CONFIRMED } = req.body;
       const branchId = req.branchId || req.body.branchId || req.user.branchId;
 
       const invoice = await BillingService.createKachaBill({
@@ -19,10 +82,10 @@ class BillingController {
         payments,
         notes,
         userId: req.user._id,
-        status: INVOICE_STATUSES.CONFIRMED
+        status
       });
 
-      return ApiResponse.created(res, 'Kacha bill generated successfully', invoice);
+      return ApiResponse.created(res, status === INVOICE_STATUSES.DRAFT ? 'Kacha bill saved as draft' : 'Kacha bill generated successfully', invoice);
     } catch (error) {
       next(error);
     }
@@ -73,6 +136,7 @@ class BillingController {
       if (!bill) {
         throw ApiError.notFound('Kacha bill not found');
       }
+      assertBranchAccess(req, bill);
       return ApiResponse.success(res, 'Kacha bill details', bill);
     } catch (error) {
       next(error);
@@ -81,6 +145,7 @@ class BillingController {
 
   static async convertKachaToPakka(req, res, next) {
     try {
+      await guardBranch(req, Invoice, req.params.id, 'Kacha bill');
       const pakkaInvoice = await BillingService.convertKachaToPakka({
         kachaBillId: req.params.id,
         userId: req.user._id
@@ -95,7 +160,7 @@ class BillingController {
   // --- PAKKA / GST BILLS ---
   static async createPakkaBill(req, res, next) {
     try {
-      const { customerId, items, discount = 0, payments = [], notes } = req.body;
+      const { customerId, items, discount = 0, payments = [], notes, status = INVOICE_STATUSES.CONFIRMED } = req.body;
       const branchId = req.branchId || req.body.branchId || req.user.branchId;
 
       const invoice = await BillingService.createPakkaBill({
@@ -106,10 +171,10 @@ class BillingController {
         payments,
         notes,
         userId: req.user._id,
-        status: INVOICE_STATUSES.CONFIRMED
+        status
       });
 
-      return ApiResponse.created(res, 'Pakka GST invoice created successfully', invoice);
+      return ApiResponse.created(res, status === INVOICE_STATUSES.DRAFT ? 'Pakka bill saved as draft' : 'Pakka GST invoice created successfully', invoice);
     } catch (error) {
       next(error);
     }
@@ -162,6 +227,7 @@ class BillingController {
       if (!bill) {
         throw ApiError.notFound('Pakka invoice not found');
       }
+      assertBranchAccess(req, bill);
       return ApiResponse.success(res, 'Pakka invoice details', bill);
     } catch (error) {
       next(error);
@@ -170,14 +236,39 @@ class BillingController {
 
   static async cancelInvoice(req, res, next) {
     try {
-      const { reason } = req.body;
+      const { reason, paymentAction, refundMode, refundModeDetails } = req.body;
+      await guardBranch(req, Invoice, req.params.id, 'Invoice');
       const cancelledInvoice = await BillingService.cancelInvoice({
         invoiceId: req.params.id,
         reason,
+        paymentAction,
+        refundMode,
+        refundModeDetails,
         userId: req.user._id
       });
 
-      return ApiResponse.success(res, 'Invoice cancelled successfully and stock restored', cancelledInvoice);
+      return ApiResponse.success(res, 'Invoice cancelled: stock restored, receivable reversed and payments settled', cancelledInvoice);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async updateDraft(req, res, next) {
+    try {
+      await guardBranch(req, Invoice, req.params.id, 'Bill');
+      const { customerId, items, discount, notes } = req.body;
+      const invoice = await BillingService.updateDraft({ invoiceId: req.params.id, customerId, items, discount, notes, userId: req.user._id });
+      return ApiResponse.success(res, 'Draft updated', invoice);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async confirmDraft(req, res, next) {
+    try {
+      await guardBranch(req, Invoice, req.params.id, 'Bill');
+      const invoice = await BillingService.confirmDraft({ invoiceId: req.params.id, payments: req.body.payments || [], userId: req.user._id });
+      return ApiResponse.success(res, 'Bill confirmed: stock deducted and ledger posted', invoice);
     } catch (error) {
       next(error);
     }

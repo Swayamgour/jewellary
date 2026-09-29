@@ -50,6 +50,9 @@ module.exports = {
     PAKKA: 'PAKKA'
   },
 
+  // Invoice lifecycle status. Payment progress is tracked ONLY in `paymentStatus`.
+  // PARTIAL / PAID / DUE are kept in the enum purely so documents created by older
+  // versions of the backend still load; new code never writes them to `status`.
   INVOICE_STATUSES: {
     DRAFT: 'DRAFT',
     CONFIRMED: 'CONFIRMED',
@@ -58,6 +61,44 @@ module.exports = {
     DUE: 'DUE',
     CANCELLED: 'CANCELLED',
     CONVERTED: 'CONVERTED'
+  },
+
+  // Statuses that represent a live, posted sale (used by every report / dashboard query)
+  LIVE_INVOICE_STATUSES: ['CONFIRMED', 'PARTIAL', 'PAID', 'DUE'],
+
+  PURCHASE_STATUSES: {
+    DRAFT: 'DRAFT',
+    COMPLETED: 'COMPLETED',
+    CANCELLED: 'CANCELLED'
+  },
+
+  PURCHASE_ORDER_STATUSES: {
+    DRAFT: 'DRAFT',
+    SUBMITTED: 'SUBMITTED',
+    APPROVED: 'APPROVED',
+    ORDERED: 'ORDERED',
+    PARTIALLY_RECEIVED: 'PARTIALLY_RECEIVED',
+    RECEIVED: 'RECEIVED',
+    CLOSED: 'CLOSED',
+    REJECTED: 'REJECTED',
+    CANCELLED: 'CANCELLED'
+  },
+
+  RETURN_STATUSES: {
+    NONE: 'NONE',
+    PARTIAL: 'PARTIAL',
+    FULL: 'FULL'
+  },
+
+  PAYMENT_DIRECTIONS: {
+    IN: 'IN',
+    OUT: 'OUT'
+  },
+
+  // What to do with money already received / paid when a document is cancelled
+  PAYMENT_ACTIONS: {
+    REFUND: 'REFUND',
+    CREDIT: 'CREDIT'
   },
 
   PAYMENT_MODES: {
@@ -89,7 +130,8 @@ module.exports = {
     ADJUSTMENT_OUT: 'ADJUSTMENT_OUT',
     OPENING: 'OPENING',
     DAMAGE: 'DAMAGE',
-    LOSS: 'LOSS'
+    LOSS: 'LOSS',
+    PURCHASE_CANCEL: 'PURCHASE_CANCEL'
   },
 
   INVENTORY_STATUSES: {
@@ -97,7 +139,9 @@ module.exports = {
     SOLD: 'SOLD',
     RESERVED: 'RESERVED',
     DAMAGED: 'DAMAGED',
-    EXCHANGED: 'EXCHANGED'
+    EXCHANGED: 'EXCHANGED',
+    RETURNED: 'RETURNED', // sent back to the vendor
+    CANCELLED: 'CANCELLED' // purchase entry cancelled
   },
 
   ORDER_STATUSES: {
@@ -132,6 +176,13 @@ module.exports = {
     CONVERT: 'CONVERT',
     PAYMENT: 'PAYMENT',
     STOCK_ADJUSTMENT: 'STOCK_ADJUSTMENT',
-    RETURN: 'RETURN'
+    RETURN: 'RETURN',
+    CONFIRM: 'CONFIRM',
+    SUBMIT: 'SUBMIT',
+    REJECT: 'REJECT',
+    ORDER: 'ORDER',
+    RECEIVE: 'RECEIVE',
+    CLOSE: 'CLOSE',
+    REFUND: 'REFUND'
   }
 };

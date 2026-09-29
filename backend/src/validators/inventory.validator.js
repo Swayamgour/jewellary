@@ -5,7 +5,6 @@ const inventoryAdjustmentSchema = Joi.object({
   barcode: Joi.string().required(),
   adjustmentType: Joi.string().valid('ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'LOSS').required(),
   quantityDelta: Joi.number().integer().required(),
-  weightDelta: Joi.number().optional(),
   reason: Joi.string().min(3).required()
 });
 
@@ -54,6 +53,16 @@ const expenseSchema = Joi.object({
   notes: Joi.string().allow('', null)
 });
 
+const expenseUpdateSchema = Joi.object({
+  title: Joi.string().trim(),
+  category: Joi.string().trim(),
+  amount: Joi.number().positive(),
+  paymentMode: Joi.string(),
+  paymentReference: Joi.string().allow('', null),
+  expenseDate: Joi.date(),
+  notes: Joi.string().allow('', null)
+});
+
 const orderSchema = Joi.object({
   customerId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).required(),
   expectedDeliveryDate: Joi.date().greater('now').required(),
@@ -83,5 +92,6 @@ module.exports = {
   exchangeSchema,
   goldRateSchema,
   expenseSchema,
+  expenseUpdateSchema,
   orderSchema
 };

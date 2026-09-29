@@ -1,11 +1,13 @@
+const escapeRegex = require('../utils/escapeRegex');
 const Inventory = require('../models/Inventory');
 const StockMovement = require('../models/StockMovement');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const DecimalUtil = require('../utils/decimal');
+const InventoryService = require('../services/inventory.service');
 const { logAudit } = require('../utils/auditLogger');
 const { withTransaction } = require('../utils/transaction');
-const { AUDIT_ACTIONS, STOCK_MOVEMENT_TYPES, INVENTORY_STATUSES } = require('../config/constants');
+const { AUDIT_ACTIONS } = require('../config/constants');
 
 class InventoryController {
   static async getInventory(req, res, next) {
@@ -24,8 +26,8 @@ class InventoryController {
 
       if (req.query.search) {
         query.$or = [
-          { barcode: { $regex: req.query.search, $options: 'i' } },
-          { warehouseLocation: { $regex: req.query.search, $options: 'i' } }
+          { barcode: { $regex: escapeRegex(req.query.search), $options: 'i' } },
+          { warehouseLocation: { $regex: escapeRegex(req.query.search), $options: 'i' } }
         ];
       }
 
@@ -100,46 +102,19 @@ class InventoryController {
 
   static async stockAdjustment(req, res, next) {
     try {
-      const { barcode, adjustmentType, quantityDelta, weightDelta = 0, reason } = req.body;
+      const { barcode, adjustmentType, quantityDelta, reason } = req.body;
       const branchId = req.branchId || req.user.branchId;
 
       const result = await withTransaction(async (session) => {
-        const item = await Inventory.findOne({ barcode: barcode.toUpperCase(), branchId }).session(session);
-        if (!item) {
-          throw ApiError.notFound(`Item with barcode ${barcode} not found`);
-        }
-
-        const newQty = item.quantity + quantityDelta;
-        if (newQty < 0) {
-          throw ApiError.badRequest(`Adjustment would result in negative stock. Current: ${item.quantity}, Delta: ${quantityDelta}`);
-        }
-
-        item.quantity = newQty;
-        if (item.quantity === 0) {
-          item.status = adjustmentType === 'DAMAGE' ? INVENTORY_STATUSES.DAMAGED : INVENTORY_STATUSES.SOLD;
-        } else {
-          item.status = INVENTORY_STATUSES.AVAILABLE;
-        }
-
-        await item.save({ session });
-
-        const movement = new StockMovement({
-          inventoryId: item._id,
-          barcode: item.barcode,
-          productId: item.productId,
-          movementType: adjustmentType,
-          quantityDelta,
-          weightDelta,
-          balanceQuantity: item.quantity,
-          balanceWeight: item.netWeight,
+        const item = await InventoryService.adjustStock({
+          barcode,
           branchId,
-          referenceType: 'Manual',
+          adjustmentType,
+          quantityDelta,
+          reason,
           performedBy: req.user._id,
-          reason
+          session
         });
-
-        await movement.save({ session });
-
         await logAudit(
           {
             userId: req.user._id,
@@ -151,7 +126,6 @@ class InventoryController {
           },
           session
         );
-
         return item;
       });
 
@@ -166,63 +140,16 @@ class InventoryController {
       const { barcode, targetBranchId, reason } = req.body;
       const sourceBranchId = req.branchId || req.user.branchId;
 
-      if (sourceBranchId.toString() === targetBranchId.toString()) {
-        throw ApiError.badRequest('Target branch cannot be the same as source branch');
-      }
-
-      const result = await withTransaction(async (session) => {
-        const item = await Inventory.findOne({ barcode: barcode.toUpperCase(), branchId: sourceBranchId }).session(session);
-        if (!item) {
-          throw ApiError.notFound(`Item with barcode ${barcode} not found in this branch`);
-        }
-
-        if (item.status !== INVENTORY_STATUSES.AVAILABLE || item.quantity <= 0) {
-          throw ApiError.badRequest(`Item ${barcode} is not available for transfer (Status: ${item.status})`);
-        }
-
-        // Transfer item branch
-        item.branchId = targetBranchId;
-        await item.save({ session });
-
-        // Record transfer out
-        const transferOut = new StockMovement({
-          inventoryId: item._id,
-          barcode: item.barcode,
-          productId: item.productId,
-          movementType: STOCK_MOVEMENT_TYPES.TRANSFER_OUT,
-          quantityDelta: -item.quantity,
-          weightDelta: -item.netWeight,
-          balanceQuantity: 0,
-          balanceWeight: 0,
-          branchId: sourceBranchId,
+      const result = await withTransaction(async (session) =>
+        InventoryService.transferToBranch({
+          barcode,
+          sourceBranchId,
           targetBranchId,
-          referenceType: 'Transfer',
+          reason,
           performedBy: req.user._id,
-          reason: `Transfer to Branch: ${reason || 'Inter-branch transfer'}`
-        });
-
-        // Record transfer in
-        const transferIn = new StockMovement({
-          inventoryId: item._id,
-          barcode: item.barcode,
-          productId: item.productId,
-          movementType: STOCK_MOVEMENT_TYPES.TRANSFER_IN,
-          quantityDelta: item.quantity,
-          weightDelta: item.netWeight,
-          balanceQuantity: item.quantity,
-          balanceWeight: item.netWeight,
-          branchId: targetBranchId,
-          targetBranchId: sourceBranchId,
-          referenceType: 'Transfer',
-          performedBy: req.user._id,
-          reason: `Transfer from Branch: ${reason || 'Inter-branch transfer'}`
-        });
-
-        await transferOut.save({ session });
-        await transferIn.save({ session });
-
-        return item;
-      });
+          session
+        })
+      );
 
       return ApiResponse.success(res, 'Item transferred to target branch successfully', result);
     } catch (error) {

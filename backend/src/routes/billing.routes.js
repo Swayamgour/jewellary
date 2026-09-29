@@ -5,10 +5,14 @@ const authenticate = require('../middleware/auth.middleware');
 const resolveBranch = require('../middleware/branch.middleware');
 const validate = require('../middleware/validate.middleware');
 const { authorizeRoles, authorizePermission } = require('../middleware/role.middleware');
-const { createInvoiceSchema, cancelInvoiceSchema } = require('../validators/billing.validator');
+const { createInvoiceSchema, updateDraftSchema, confirmDraftSchema, cancelInvoiceSchema } = require('../validators/billing.validator');
 const { ROLES, PERMISSIONS } = require('../config/constants');
 
 router.use(authenticate, resolveBranch);
+
+// Unified register + generic detail (drafts, cancelled and converted bills included)
+router.get('/', BillingController.listInvoices);
+router.get('/:id([0-9a-fA-F]{24})', BillingController.getInvoiceById);
 
 // Kacha Bills
 router.post('/kacha', validate(createInvoiceSchema), BillingController.createKachaBill);
@@ -20,10 +24,22 @@ router.post(
   BillingController.convertKachaToPakka
 );
 
+router.put('/kacha/:id', validate(updateDraftSchema), BillingController.updateDraft);
+router.post('/kacha/:id/confirm', validate(confirmDraftSchema), BillingController.confirmDraft);
+router.post(
+  '/kacha/:id/cancel',
+  authorizeRoles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.BRANCH_MANAGER),
+  authorizePermission(PERMISSIONS.CANCEL),
+  validate(cancelInvoiceSchema),
+  BillingController.cancelInvoice
+);
+
 // Pakka / GST Invoices
 router.post('/pakka', validate(createInvoiceSchema), BillingController.createPakkaBill);
 router.get('/pakka', BillingController.getPakkaBills);
 router.get('/pakka/:id', BillingController.getPakkaBillById);
+router.put('/pakka/:id', validate(updateDraftSchema), BillingController.updateDraft);
+router.post('/pakka/:id/confirm', validate(confirmDraftSchema), BillingController.confirmDraft);
 router.post(
   '/pakka/:id/cancel',
   authorizeRoles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.BRANCH_MANAGER),

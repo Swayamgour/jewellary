@@ -13,7 +13,7 @@ const vendorLedgerSchema = new mongoose.Schema(
     },
     entryType: {
       type: String,
-      enum: ['PURCHASE', 'PAYMENT', 'RETURN', 'OPENING', 'ADJUSTMENT'],
+      enum: ['PURCHASE', 'PAYMENT', 'RETURN', 'OPENING', 'ADJUSTMENT', 'REFUND', 'CANCELLATION'],
       required: true
     },
     referenceType: {

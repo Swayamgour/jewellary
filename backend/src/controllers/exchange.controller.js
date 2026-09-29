@@ -2,6 +2,7 @@ const Exchange = require('../models/Exchange');
 const ExchangeService = require('../services/exchange.service');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
+const { assertBranchAccess, guardBranch } = require('../utils/branchScope');
 
 class ExchangeController {
   static async createExchange(req, res, next) {
@@ -67,7 +68,39 @@ class ExchangeController {
       if (!exchange) {
         throw ApiError.notFound('Exchange record not found');
       }
+      assertBranchAccess(req, exchange);
       return ApiResponse.success(res, 'Exchange details', exchange);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async adjust(req, res, next) {
+    try {
+      await guardBranch(req, Exchange, req.params.id, 'Exchange');
+      const exchange = await ExchangeService.adjustToInvoice({
+        exchangeId: req.params.id,
+        invoiceId: req.body.invoiceId,
+        amount: req.body.amount,
+        userId: req.user._id
+      });
+      return ApiResponse.success(res, 'Old-gold value adjusted against invoice', exchange);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async payout(req, res, next) {
+    try {
+      await guardBranch(req, Exchange, req.params.id, 'Exchange');
+      const exchange = await ExchangeService.payout({
+        exchangeId: req.params.id,
+        amount: req.body.amount,
+        paymentMode: req.body.paymentMode,
+        modeDetails: req.body.modeDetails,
+        userId: req.user._id
+      });
+      return ApiResponse.success(res, 'Old-gold value paid out to customer', exchange);
     } catch (error) {
       next(error);
     }

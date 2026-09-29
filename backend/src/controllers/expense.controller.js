@@ -1,7 +1,9 @@
 const Expense = require('../models/Expense');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const BarcodeGenerator = require('../utils/barcodeGenerator');
+const Branch = require('../models/Branch');
+const { nextDocNo } = require('../utils/sequence');
+const { assertBranchAccess } = require('../utils/branchScope');
 const { logAudit } = require('../utils/auditLogger');
 const { AUDIT_ACTIONS } = require('../config/constants');
 
@@ -11,7 +13,8 @@ class ExpenseController {
       const { title, category, amount, paymentMode, paymentReference, expenseDate, notes } = req.body;
       const branchId = req.branchId || req.body.branchId || req.user.branchId;
 
-      const expenseNo = BarcodeGenerator.generateInvoiceNo('EXP', 'BR', Math.floor(1000 + Math.random() * 9000));
+      const branch = await Branch.findById(branchId).select('code');
+      const expenseNo = await nextDocNo('EXP', branch?.code || 'BR', null, { model: Expense, field: 'expenseNo' });
 
       const expense = new Expense({
         expenseNo,
@@ -92,7 +95,11 @@ class ExpenseController {
         throw ApiError.notFound('Expense record not found');
       }
 
-      Object.assign(expense, req.body);
+      assertBranchAccess(req, expense);
+      // only these fields may change - never branch / recordedBy / number
+      ['title', 'category', 'amount', 'paymentMode', 'paymentReference', 'expenseDate', 'notes'].forEach((f) => {
+        if (req.body[f] !== undefined) expense[f] = f === 'category' ? String(req.body[f]).toUpperCase() : req.body[f];
+      });
       await expense.save();
 
       return ApiResponse.success(res, 'Expense updated successfully', expense);

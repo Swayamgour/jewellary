@@ -4,15 +4,19 @@ const SalesController = require('../controllers/sales.controller');
 const authenticate = require('../middleware/auth.middleware');
 const resolveBranch = require('../middleware/branch.middleware');
 const { authorizeRoles } = require('../middleware/role.middleware');
+const validate = require('../middleware/validate.middleware');
+const { salesReturnSchema } = require('../validators/billing.validator');
 const { ROLES } = require('../config/constants');
 
 router.use(authenticate, resolveBranch);
 
+router.get('/returns', SalesController.getSalesReturns);
 router.get('/', SalesController.getSales);
 router.get('/:id', SalesController.getSaleById);
 router.post(
   '/:id/return',
   authorizeRoles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.BRANCH_MANAGER, ROLES.SALES_MANAGER),
+  validate(salesReturnSchema),
   SalesController.recordSalesReturn
 );
 

@@ -13,6 +13,7 @@ const purchaseReturnSchema = new mongoose.Schema(
       ref: 'Purchase',
       required: true
     },
+    purchaseNo: { type: String, default: '' },
     vendorId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Vendor',
@@ -24,17 +25,24 @@ const purchaseReturnSchema = new mongoose.Schema(
     },
     items: [
       {
+        purchaseItemId: { type: mongoose.Schema.Types.ObjectId, required: true },
+        inventoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'Inventory' },
         barcode: { type: String, required: true },
         productName: { type: String, required: true },
         metal: { type: String, required: true },
         purity: { type: String, required: true },
         grossWeight: { type: Number, required: true },
         netWeight: { type: Number, required: true },
-        quantity: { type: Number, default: 1 },
-        rate: { type: Number, required: true },
-        amount: { type: Number, required: true }
+        quantity: { type: Number, default: 1, min: 1 },
+        taxableAmount: { type: Number, default: 0 },
+        taxAmount: { type: Number, default: 0 },
+        amount: { type: Number, required: true },
+        // Kept for compatibility with older clients: metal rate per gram of the purchase line
+        rate: { type: Number, default: 0 }
       }
     ],
+    totalTaxable: { type: Number, default: 0 },
+    totalTax: { type: Number, default: 0 },
     totalAmount: {
       type: Number,
       required: true,
@@ -43,6 +51,16 @@ const purchaseReturnSchema = new mongoose.Schema(
     reason: {
       type: String,
       required: true
+    },
+    // Snapshot of the purchase position right after this return
+    reconciliation: {
+      originalTotal: { type: Number, default: 0 },
+      totalReturned: { type: Number, default: 0 },
+      adjustedTotal: { type: Number, default: 0 },
+      paid: { type: Number, default: 0 },
+      adjustedDue: { type: Number, default: 0 },
+      refundDue: { type: Number, default: 0 },
+      vendorBalanceAfter: { type: Number, default: 0 }
     },
     branchId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -62,6 +80,6 @@ const purchaseReturnSchema = new mongoose.Schema(
 
 purchaseReturnSchema.index({ purchaseId: 1 });
 purchaseReturnSchema.index({ vendorId: 1, returnDate: -1 });
-purchaseReturnSchema.index({ branchId: 1 });
+purchaseReturnSchema.index({ branchId: 1, returnDate: -1 });
 
 module.exports = mongoose.model('PurchaseReturn', purchaseReturnSchema);

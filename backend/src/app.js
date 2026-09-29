@@ -16,20 +16,13 @@ const app = express();
 app.use(helmet());
 
 // Enable CORS
-// app.use(
-//   cors({
-//     origin: env.CLIENT_URL || '*',
-//     credentials: true,
-//     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-//     allowedHeaders: ['Content-Type', 'Authorization', 'x-branch-id']
-//   })
-// );
-
 app.use(
   cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-branch-id'],
+    origin:  '*',
+    // credentials: true,
+    // methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-branch-id']
   })
 );
 
@@ -54,7 +47,7 @@ app.use('/api', apiRoutes);
 // Root greeting / health check
 app.get('/', (req, res) => {
   res.status(200).json({
-    name: 'Jewellery ERP APIs',
+    name: 'Jewellery ERP API',
     version: '1.0.0',
     documentation: '/api/health',
     status: 'ONLINE'

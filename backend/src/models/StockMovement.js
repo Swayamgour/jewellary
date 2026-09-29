@@ -51,7 +51,7 @@ const stockMovementSchema = new mongoose.Schema(
     },
     referenceType: {
       type: String,
-      enum: ['Invoice', 'Purchase', 'SalesReturn', 'PurchaseReturn', 'Exchange', 'Manual', 'Transfer'],
+      enum: ['Invoice', 'Purchase', 'PurchaseOrder', 'SalesReturn', 'PurchaseReturn', 'Exchange', 'Manual', 'Transfer'],
       required: true
     },
     referenceId: {
