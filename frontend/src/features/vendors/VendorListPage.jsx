@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Briefcase, Plus, Search, Phone, Building } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Briefcase, Plus, Search, Building, ArrowUpRight } from 'lucide-react';
 import { useGetVendorsQuery, useCreateVendorMutation } from '../../app/api/baseApi';
 import { Table, TableRow, TableCell } from '../../components/ui/Table';
 import { TableSkeleton } from '../../components/ui/Skeleton';
@@ -7,14 +8,20 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { formatCurrency } from '../../utils/formatters';
+import { Pagination } from '../../components/ui/Pagination';
+import { useDebounce } from '../../utils/useDebounce';
+import { absCurrency } from '../../utils/formatters';
+import { getErrorMessage } from '../../utils/errors';
 import { toast } from 'sonner';
 
 export const VendorListPage = () => {
-  const [search, setSearch] = useState('');
+  const navigate = useNavigate();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
+  const search = useDebounce(searchTerm, 350);
 
-  const { data: vendorData, isLoading } = useGetVendorsQuery({ search });
+  const { data: vendorData, isLoading } = useGetVendorsQuery({ search: search || undefined, page, limit: 20 });
   const [createVendor, { isLoading: isCreating }] = useCreateVendorMutation();
 
   const vendors = vendorData?.data || [];
@@ -74,7 +81,7 @@ export const VendorListPage = () => {
         pincode: '395002'
       });
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to create vendor');
+      toast.error(getErrorMessage(err, 'Failed to create vendor'));
     }
   };
 
@@ -105,8 +112,8 @@ export const VendorListPage = () => {
             <Input
               placeholder="Search vendors by company, contact person or GSTIN..."
               icon={Search}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={searchTerm}
+              onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
             />
           </div>
         </div>
@@ -129,11 +136,14 @@ export const VendorListPage = () => {
               'Mobile',
               'Location',
               'GSTIN',
-              { label: 'Payable Balance', align: 'right' }
+              'Balance',
+              ''
+              // { label: 'Balance', align: 'right' },
+              // { label: '', align: 'right' }
             ]}
           >
             {vendors.map((v) => (
-              <TableRow key={v._id}>
+              <TableRow key={v._id} onClick={() => navigate(`/vendors/${v._id}`)}>
                 <TableCell className="font-bold text-surface-900">
                   <div className="flex items-center gap-2">
                     <Building className="w-3.5 h-3.5 text-gold-600" />
@@ -143,21 +153,22 @@ export const VendorListPage = () => {
                 <TableCell className="text-surface-700 font-medium">{v.name}</TableCell>
                 <TableCell className="text-surface-600">📞 {v.mobile || '-'}</TableCell>
                 <TableCell className="text-surface-500">
-                  {v.address?.city || 'Surat'}, {v.address?.state || 'GJ'}
+                  {v.address?.city || '-'}{v.address?.state ? `, ${v.address.state}` : ''}
                 </TableCell>
                 <TableCell className="font-mono text-surface-600">{v.gstin || '-'}</TableCell>
                 <TableCell
                   align="right"
-                  className={`font-bold ${
-                    v.currentBalance > 0 ? 'text-amber-600' : 'text-emerald-700'
-                  }`}
+                  className={`font-bold ${v.currentBalance > 0 ? 'text-amber-600' : v.currentBalance < 0 ? 'text-emerald-700' : 'text-surface-400'
+                    }`}
                 >
-                  {formatCurrency(v.currentBalance || 0)}
+                  {v.currentBalance > 0 ? absCurrency(v.currentBalance) : v.currentBalance < 0 ? `Adv ${absCurrency(v.currentBalance)}` : '—'}
                 </TableCell>
+                <TableCell align="right"><ArrowUpRight className="w-4 h-4 text-surface-400 inline" /></TableCell>
               </TableRow>
             ))}
           </Table>
         )}
+        <Pagination pagination={vendorData?.pagination} onPage={setPage} />
       </div>
 
       {/* Add Vendor Modal */}

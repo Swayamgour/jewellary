@@ -1,269 +1,181 @@
-import React, { useState } from 'react';
-import { Truck, Plus, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Truck, Plus, Trash2, Save } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
-import { useGetVendorsQuery, useCreatePurchaseMutation } from '../../app/api/baseApi';
-import { formatCurrency, formatWeight } from '../../utils/formatters';
+import { ProductSelect } from './ProductSelect';
+import { useGetVendorsQuery, useCreatePurchaseMutation, useUpdatePurchaseMutation } from '../../app/api/baseApi';
+import { METALS, PURITIES, PAYMENT_MODES } from '../../utils/constants';
+import { formatCurrency } from '../../utils/formatters';
+import { getErrorMessage } from '../../utils/errors';
 import { toast } from 'sonner';
 
-export const PurchaseEntryModal = ({ isOpen, onClose }) => {
-  const { data: vendorData } = useGetVendorsQuery();
-  const [createPurchase, { isLoading }] = useCreatePurchaseMutation();
+const blankLine = () => ({
+  productId: '', productName: '', barcode: '', metal: 'GOLD', purity: '22K',
+  grossWeight: '', stoneWeight: '0', quantity: '1', rate: '', makingAmount: '0', otherCharges: '0', gstRate: '3'
+});
 
+const num = (v) => parseFloat(v) || 0;
+const lineMath = (l) => {
+  const net = Math.max(0, num(l.grossWeight) - num(l.stoneWeight));
+  const qty = parseInt(l.quantity, 10) || 1;
+  const taxable = net * qty * num(l.rate) + num(l.makingAmount) + num(l.otherCharges);
+  const tax = (taxable * num(l.gstRate)) / 100;
+  return { net, qty, taxable, tax, total: taxable + tax };
+};
+
+/**
+ * Record a vendor purchase (creates stock) or edit a DRAFT purchase.
+ * Weights are PER PIECE; making / other charges are for the whole line; rate is ₹ per gram.
+ */
+export const PurchaseEntryModal = ({ isOpen, onClose, draft = null }) => {
+  const { data: vendorData } = useGetVendorsQuery({ limit: 200 });
+  const [createPurchase, { isLoading: creating }] = useCreatePurchaseMutation();
+  const [updatePurchase, { isLoading: updating }] = useUpdatePurchaseMutation();
   const vendors = vendorData?.data || [];
 
   const [vendorId, setVendorId] = useState('');
   const [vendorInvoiceNo, setVendorInvoiceNo] = useState('');
   const [paymentMode, setPaymentMode] = useState('BANK_TRANSFER');
-  const [paidAmount, setPaidAmount] = useState('0');
+  const [paidAmount, setPaidAmount] = useState('');
   const [notes, setNotes] = useState('');
+  const [items, setItems] = useState([blankLine()]);
 
-  const [items, setItems] = useState([
-    {
-      productName: 'Raw Gold Bullion Bar 24K',
-      metal: 'GOLD',
-      purity: '24K',
-      grossWeight: 50.0,
-      stoneWeight: 0,
-      quantity: 1,
-      rate: 7800,
-      makingAmount: 0,
-      otherCharges: 0,
-      taxAmount: 0
+  useEffect(() => {
+    if (!isOpen) return;
+    if (draft) {
+      setVendorId(draft.vendorId?._id || draft.vendorId || '');
+      setVendorInvoiceNo(draft.vendorInvoiceNo || '');
+      setNotes(draft.notes || '');
+      setItems(draft.items.map((i) => ({
+        productId: i.productId || '', productName: i.productName, barcode: i.barcode || '', metal: i.metal, purity: i.purity,
+        grossWeight: String(i.grossWeight), stoneWeight: String(i.stoneWeight || 0), quantity: String(i.quantity), rate: String(i.rate),
+        makingAmount: String(i.makingAmount || 0), otherCharges: String(i.otherCharges || 0), gstRate: String(i.gstRate || 0)
+      })));
+    } else {
+      setVendorId(''); setVendorInvoiceNo(''); setNotes(''); setPaidAmount(''); setItems([blankLine()]);
     }
-  ]);
+  }, [isOpen, draft]);
 
-  const handleItemChange = (index, field, value) => {
-    const updated = [...items];
-    updated[index] = { ...updated[index], [field]: value };
-    setItems(updated);
-  };
+  const totals = useMemo(() => {
+    const t = items.reduce((a, l) => {
+      const m = lineMath(l);
+      return { taxable: a.taxable + m.taxable, tax: a.tax + m.tax };
+    }, { taxable: 0, tax: 0 });
+    const grand = Math.round(t.taxable + t.tax);
+    return { ...t, grand };
+  }, [items]);
 
-  const handleAddItem = () => {
-    setItems([
-      ...items,
-      {
-        productName: '22K Gold Jewellery Lot',
-        metal: 'GOLD',
-        purity: '22K',
-        grossWeight: 20.0,
-        stoneWeight: 0,
-        quantity: 1,
-        rate: 7150,
-        makingAmount: 3000,
-        otherCharges: 0,
-        taxAmount: 0
-      }
-    ]);
-  };
+  const setLine = (i, field, value) => setItems((prev) => prev.map((l, idx) => (idx === i ? { ...l, [field]: value } : l)));
 
-  const handleRemoveItem = (index) => {
-    if (items.length === 1) return;
-    setItems(items.filter((_, i) => i !== index));
-  };
+  const buildItems = () =>
+    items.map((l) => ({
+      productId: l.productId,
+      productName: l.productName,
+      barcode: l.barcode || undefined,
+      metal: l.metal,
+      purity: l.purity,
+      grossWeight: num(l.grossWeight),
+      stoneWeight: num(l.stoneWeight),
+      quantity: parseInt(l.quantity, 10) || 1,
+      rate: num(l.rate),
+      makingAmount: num(l.makingAmount),
+      otherCharges: num(l.otherCharges),
+      gstRate: num(l.gstRate)
+    }));
 
-  const subtotal = items.reduce((acc, item) => {
-    const netWeight = Math.max(0, (parseFloat(item.grossWeight) || 0) - (parseFloat(item.stoneWeight) || 0));
-    const metalVal = netWeight * (parseFloat(item.rate) || 0);
-    const making = (parseFloat(item.makingAmount) || 0);
-    const other = (parseFloat(item.otherCharges) || 0);
-    return acc + (metalVal + making + other) * (parseInt(item.quantity) || 1);
-  }, 0);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const selectedVendorId = vendorId || (vendors[0]?._id);
-    if (!selectedVendorId) {
-      toast.error('Please select a wholesale vendor');
-      return;
+  const submit = async (asDraft) => {
+    if (!vendorId) return toast.error('Please select a vendor');
+    for (const l of items) {
+      if (!l.productId) return toast.error('Choose a product design for every row');
+      if (!(num(l.grossWeight) > 0) || !(num(l.rate) > 0)) return toast.error('Every row needs a gross weight and a rate');
+      if (num(l.stoneWeight) > num(l.grossWeight)) return toast.error('Stone weight cannot exceed gross weight');
     }
+    const paid = num(paidAmount);
+    if (!asDraft && paid > totals.grand + 0.005) return toast.error(`Paid amount cannot exceed the purchase total ${formatCurrency(totals.grand)}`);
 
     try {
-      const payload = {
-        vendorId: selectedVendorId,
-        vendorInvoiceNo: vendorInvoiceNo || undefined,
-        purchaseDate: new Date(),
-        items: items.map((i) => ({
-          productName: i.productName,
-          metal: i.metal,
-          purity: i.purity,
-          grossWeight: parseFloat(i.grossWeight),
-          stoneWeight: parseFloat(i.stoneWeight) || 0,
-          quantity: parseInt(i.quantity) || 1,
-          rate: parseFloat(i.rate),
-          makingAmount: parseFloat(i.makingAmount) || 0,
-          otherCharges: parseFloat(i.otherCharges) || 0,
-          taxAmount: parseFloat(i.taxAmount) || 0
-        })),
-        taxAmount: 0,
-        paidAmount: parseFloat(paidAmount) || 0,
-        paymentMode,
-        notes
-      };
-
-      const res = await createPurchase(payload).unwrap();
-      toast.success(`Purchase ${res.data?.purchaseNo} recorded successfully!`);
+      if (draft) {
+        await updatePurchase({ id: draft._id, vendorId, vendorInvoiceNo: vendorInvoiceNo || undefined, items: buildItems(), notes }).unwrap();
+        toast.success('Draft updated');
+      } else {
+        const res = await createPurchase({
+          vendorId, vendorInvoiceNo: vendorInvoiceNo || undefined, purchaseDate: new Date(), items: buildItems(),
+          status: asDraft ? 'DRAFT' : 'COMPLETED',
+          ...(asDraft ? {} : { paidAmount: paid, paymentMode }),
+          notes
+        }).unwrap();
+        toast.success(asDraft ? `Draft ${res.data?.purchaseNo} saved` : `Purchase ${res.data?.purchaseNo} recorded - stock added`);
+      }
       onClose();
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to record purchase entry');
+      toast.error(getErrorMessage(err, 'Failed to save purchase'));
     }
   };
 
+  const busy = creating || updating;
+  const cell = 'rounded border border-surface-300 p-1 text-xs text-right focus:border-gold-500 focus:outline-none';
+
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title="Record Wholesale Bullion / Jewellery Purchase"
-      subtitle="Adds physical metal stock to warehouse inventory and credits vendor payable ledger"
-      maxWidth="max-w-4xl"
-    >
-      <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-        {/* Vendor and Invoice Info */}
+    <Modal isOpen={isOpen} onClose={onClose} title={draft ? `Edit Draft ${draft.purchaseNo}` : 'Record Vendor Purchase'} subtitle="Adds stock (weights per piece) and credits the vendor payable ledger" maxWidth="max-w-6xl">
+      <div className="space-y-4 text-xs">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-surface-50 rounded-xl border border-surface-200">
           <div>
-            <label className="text-[11px] font-bold uppercase text-surface-600">Wholesale Vendor *</label>
-            <select
-              value={vendorId || (vendors[0]?._id || '')}
-              onChange={(e) => setVendorId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-surface-300 bg-white p-2 text-xs font-semibold"
-              required
-            >
-              {vendors.map((v) => (
-                <option key={v._id} value={v._id}>
-                  {v.name} ({v.company || 'Wholesaler'})
-                </option>
-              ))}
+            <label className="text-[11px] font-bold uppercase text-surface-600">Vendor *</label>
+            <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} className="mt-1 w-full rounded-lg border border-surface-300 bg-white p-2 text-xs font-semibold">
+              <option value="">Select vendor…</option>
+              {vendors.map((v) => <option key={v._id} value={v._id}>{v.company || v.name} — {v.name}</option>)}
             </select>
           </div>
-
-          <div>
-            <Input
-              label="Vendor Invoice / Chalan No"
-              placeholder="e.g. SURAT-INV-992"
-              value={vendorInvoiceNo}
-              onChange={(e) => setVendorInvoiceNo(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="text-[11px] font-bold uppercase text-surface-600">Payment Mode</label>
-            <select
-              value={paymentMode}
-              onChange={(e) => setPaymentMode(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-surface-300 bg-white p-2 text-xs font-semibold"
-            >
-              <option value="BANK_TRANSFER">Bank Transfer (NEFT/RTGS)</option>
-              <option value="CHEQUE">Cheque</option>
-              <option value="CASH">Cash</option>
-              <option value="UPI">UPI</option>
-            </select>
-          </div>
+          <Input label="Vendor bill / challan no" value={vendorInvoiceNo} onChange={(e) => setVendorInvoiceNo(e.target.value)} placeholder="e.g. SURAT-INV-992" />
+          {!draft && (
+            <div>
+              <label className="text-[11px] font-bold uppercase text-surface-600">Payment mode (if paying now)</label>
+              <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)} className="mt-1 w-full rounded-lg border border-surface-300 bg-white p-2 text-xs font-semibold">
+                {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
-        {/* Purchase Items List */}
         <div>
           <div className="flex justify-between items-center mb-2">
-            <span className="font-bold uppercase tracking-wider text-surface-600">
-              Purchased Items / Stock Lots
-            </span>
-            <Button size="sm" variant="outline" icon={Plus} onClick={handleAddItem} type="button">
-              Add Row
-            </Button>
+            <span className="font-bold uppercase tracking-wider text-surface-600">Items received</span>
+            <Button size="sm" variant="outline" icon={Plus} onClick={() => setItems([...items, blankLine()])}>Add row</Button>
           </div>
-
           <div className="overflow-x-auto border border-surface-200 rounded-xl">
             <table className="w-full text-left">
               <thead className="bg-surface-50 text-[10px] font-bold uppercase text-surface-600 border-b border-surface-200">
                 <tr>
-                  <th className="p-2">Item Description</th>
-                  <th className="p-2">Metal</th>
-                  <th className="p-2">Purity</th>
-                  <th className="p-2">Gross Wt (g)</th>
-                  <th className="p-2">Rate (₹/g)</th>
-                  <th className="p-2">Making (₹)</th>
-                  <th className="p-2 text-right">Line Total</th>
-                  <th className="p-2 text-center">Del</th>
+                  <th className="p-2">Design *</th><th className="p-2">Barcode</th><th className="p-2">Metal / Purity</th>
+                  <th className="p-2 text-right">Gross/pc g</th><th className="p-2 text-right">Stone/pc g</th><th className="p-2 text-right">Qty</th>
+                  <th className="p-2 text-right">Rate ₹/g</th><th className="p-2 text-right">Making ₹</th><th className="p-2 text-right">Other ₹</th>
+                  <th className="p-2 text-right">GST %</th><th className="p-2 text-right">Line total</th><th className="p-2" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-100 bg-white">
-                {items.map((item, idx) => {
-                  const netWeight = Math.max(0, (parseFloat(item.grossWeight) || 0) - (parseFloat(item.stoneWeight) || 0));
-                  const total = (netWeight * (parseFloat(item.rate) || 0) + (parseFloat(item.makingAmount) || 0)) * (parseInt(item.quantity) || 1);
-
+                {items.map((l, i) => {
+                  const m = lineMath(l);
                   return (
-                    <tr key={idx}>
+                    <tr key={i} className="align-top">
                       <td className="p-2">
-                        <input
-                          type="text"
-                          value={item.productName}
-                          onChange={(e) => handleItemChange(idx, 'productName', e.target.value)}
-                          className="w-full font-bold border-b border-surface-200 focus:outline-none"
-                          required
-                        />
+                        <ProductSelect value={l.productId} onChange={(id, p) => setItems((prev) => prev.map((x, idx) => idx === i ? { ...x, productId: id, productName: p?.name || x.productName, metal: p?.metal || x.metal, purity: p?.purity || x.purity } : x))} className="w-36" />
+                        <input value={l.productName} onChange={(e) => setLine(i, 'productName', e.target.value)} placeholder="Description" className="mt-1 w-36 rounded border border-surface-300 p-1 text-xs" required />
                       </td>
+                      <td className="p-2"><input value={l.barcode} onChange={(e) => setLine(i, 'barcode', e.target.value)} placeholder="auto" className="w-28 rounded border border-surface-300 p-1 text-xs font-mono uppercase" /></td>
                       <td className="p-2">
-                        <select
-                          value={item.metal}
-                          onChange={(e) => handleItemChange(idx, 'metal', e.target.value)}
-                          className="border border-surface-200 rounded p-1"
-                        >
-                          <option value="GOLD">GOLD</option>
-                          <option value="SILVER">SILVER</option>
-                          <option value="PLATINUM">PLATINUM</option>
-                        </select>
+                        <select value={l.metal} onChange={(e) => setLine(i, 'metal', e.target.value)} className="rounded border border-surface-300 p-1 text-xs">{METALS.map((x) => <option key={x}>{x}</option>)}</select>
+                        <select value={l.purity} onChange={(e) => setLine(i, 'purity', e.target.value)} className="mt-1 rounded border border-surface-300 p-1 text-xs">{PURITIES.map((x) => <option key={x}>{x}</option>)}</select>
                       </td>
-                      <td className="p-2">
-                        <select
-                          value={item.purity}
-                          onChange={(e) => handleItemChange(idx, 'purity', e.target.value)}
-                          className="border border-surface-200 rounded p-1"
-                        >
-                          <option value="24K">24K</option>
-                          <option value="22K">22K</option>
-                          <option value="18K">18K</option>
-                          <option value="999">999</option>
-                        </select>
-                      </td>
-                      <td className="p-2">
-                        <input
-                          type="number"
-                          step="0.001"
-                          value={item.grossWeight}
-                          onChange={(e) => handleItemChange(idx, 'grossWeight', e.target.value)}
-                          className="w-20 border border-surface-200 rounded p-1 text-right font-semibold"
-                          required
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          type="number"
-                          value={item.rate}
-                          onChange={(e) => handleItemChange(idx, 'rate', e.target.value)}
-                          className="w-20 border border-surface-200 rounded p-1 text-right font-semibold"
-                          required
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          type="number"
-                          value={item.makingAmount}
-                          onChange={(e) => handleItemChange(idx, 'makingAmount', e.target.value)}
-                          className="w-16 border border-surface-200 rounded p-1 text-right"
-                        />
-                      </td>
-                      <td className="p-2 text-right font-bold text-surface-900">
-                        {formatCurrency(total)}
-                      </td>
-                      <td className="p-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveItem(idx)}
-                          className="text-surface-400 hover:text-red-600"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
+                      <td className="p-2"><input type="number" step="0.001" value={l.grossWeight} onChange={(e) => setLine(i, 'grossWeight', e.target.value)} className={`w-20 ${cell}`} /></td>
+                      <td className="p-2"><input type="number" step="0.001" value={l.stoneWeight} onChange={(e) => setLine(i, 'stoneWeight', e.target.value)} className={`w-16 ${cell}`} /></td>
+                      <td className="p-2"><input type="number" min="1" value={l.quantity} onChange={(e) => setLine(i, 'quantity', e.target.value)} className={`w-14 ${cell}`} /></td>
+                      <td className="p-2"><input type="number" value={l.rate} onChange={(e) => setLine(i, 'rate', e.target.value)} className={`w-20 ${cell}`} /></td>
+                      <td className="p-2"><input type="number" value={l.makingAmount} onChange={(e) => setLine(i, 'makingAmount', e.target.value)} className={`w-20 ${cell}`} /></td>
+                      <td className="p-2"><input type="number" value={l.otherCharges} onChange={(e) => setLine(i, 'otherCharges', e.target.value)} className={`w-16 ${cell}`} /></td>
+                      <td className="p-2"><input type="number" step="0.1" value={l.gstRate} onChange={(e) => setLine(i, 'gstRate', e.target.value)} className={`w-14 ${cell}`} /></td>
+                      <td className="p-2 text-right font-bold text-surface-900">{formatCurrency(m.total)}<span className="block text-[10px] font-normal text-surface-400">{(m.net * m.qty).toFixed(3)} g net</span></td>
+                      <td className="p-2"><button type="button" disabled={items.length === 1} onClick={() => setItems(items.filter((_, idx) => idx !== i))} className="text-surface-400 hover:text-red-600 disabled:opacity-30"><Trash2 className="w-3.5 h-3.5" /></button></td>
                     </tr>
                   );
                 })}
@@ -272,36 +184,27 @@ export const PurchaseEntryModal = ({ isOpen, onClose }) => {
           </div>
         </div>
 
-        {/* Settlement Breakdown */}
-        <div className="flex justify-between items-center p-3 bg-gold-50/70 rounded-xl border border-gold-200">
-          <div>
-            <span className="text-surface-600">Total Purchase Valuation:</span>
-            <span className="text-lg font-black text-surface-900 ml-2 font-display">
-              {formatCurrency(subtotal)}
-            </span>
+        <div className="flex flex-wrap justify-between items-center gap-3 p-3 bg-gold-50/70 rounded-xl border border-gold-200">
+          <div className="space-y-0.5">
+            <p className="text-surface-600">Taxable {formatCurrency(totals.taxable)} + GST {formatCurrency(totals.tax)}</p>
+            <p><span className="text-surface-600">Purchase total: </span><span className="text-lg font-black text-surface-900 font-display">{formatCurrency(totals.grand)}</span></p>
           </div>
-
-          <div className="flex items-center gap-3">
-            <span className="font-semibold text-surface-700">Initial Paid Amount:</span>
-            <input
-              type="number"
-              placeholder="₹0"
-              value={paidAmount}
-              onChange={(e) => setPaidAmount(e.target.value)}
-              className="w-28 rounded-lg border border-surface-300 p-1.5 text-right font-bold"
-            />
-          </div>
+          {!draft && (
+            <div className="flex items-center gap-3">
+              <span className="font-semibold text-surface-700">Paid now ₹</span>
+              <input type="number" min="0" placeholder="0" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} className="w-32 rounded-lg border border-surface-300 p-1.5 text-right font-bold" />
+            </div>
+          )}
         </div>
+
+        <Input label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
 
         <div className="flex justify-end gap-3 pt-3 border-t border-surface-200">
-          <Button variant="outline" type="button" onClick={onClose} disabled={isLoading}>
-            Cancel
-          </Button>
-          <Button variant="primary" type="submit" isLoading={isLoading} icon={Truck}>
-            Save Purchase & Update Inventory
-          </Button>
+          <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button variant="outline" icon={Save} onClick={() => submit(true)} isLoading={busy}>{draft ? 'Save Draft' : 'Save as Draft'}</Button>
+          {!draft && <Button variant="primary" icon={Truck} onClick={() => submit(false)} isLoading={busy}>Save Purchase & Add Stock</Button>}
         </div>
-      </form>
+      </div>
     </Modal>
   );
 };

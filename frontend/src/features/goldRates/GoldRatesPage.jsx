@@ -15,7 +15,7 @@ export const GoldRatesPage = () => {
   const [modalOpen, setModalOpen] = useState(false);
 
   const { data: currentRatesData, isLoading: currentLoading } = useGetCurrentGoldRatesQuery();
-  const { data: historyData, isLoading: historyLoading } = useGetGoldRateHistoryQuery();
+  const { data: historyData, isLoading: historyLoading } = useGetGoldRateHistoryQuery({ limit: 100 });
 
   const currentRates = currentRatesData?.data || [];
   const historyRates = historyData?.data || [];

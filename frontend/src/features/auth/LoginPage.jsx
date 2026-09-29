@@ -6,6 +6,7 @@ import { useLoginMutation } from '../../app/api/baseApi';
 import { setCredentials } from './authSlice';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { getErrorMessage } from '../../utils/errors';
 import { toast } from 'sonner';
 
 export const LoginPage = () => {
@@ -35,7 +36,7 @@ export const LoginPage = () => {
         navigate('/dashboard');
       }
     } catch (err) {
-      toast.error(err?.data?.message || 'Login failed. Please check your credentials.');
+      toast.error(getErrorMessage(err, 'Login failed. Please check your credentials.'));
     }
   };
 
@@ -58,7 +59,7 @@ export const LoginPage = () => {
         navigate('/dashboard');
       }
     } catch (err) {
-      toast.error(err?.data?.message || 'Demo login failed');
+      toast.error(getErrorMessage(err, 'Demo login failed'));
     }
   };
 
@@ -74,7 +75,7 @@ export const LoginPage = () => {
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-gold-400 to-gold-600 text-white shadow-lg shadow-gold-500/30 mb-4">
             <Coins className="w-8 h-8 text-surface-950" />
           </div>
-          <h1 className="text-2xl font-black text-surface-900 tracking-tight font-display">AURA JEWEL</h1>
+          <h1 className="text-2xl font-black text-surface-900 tracking-tight font-display">Jewellery</h1>
           <p className="text-xs uppercase font-bold tracking-widest text-gold-700 mt-1">
             Enterprise Jewellery POS & ERP
           </p>

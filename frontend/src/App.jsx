@@ -15,6 +15,7 @@ import { InventoryListPage } from './features/inventory/InventoryListPage';
 import { CustomerListPage } from './features/customers/CustomerListPage';
 import { CustomerDetailPage } from './features/customers/CustomerDetailPage';
 import { VendorListPage } from './features/vendors/VendorListPage';
+import { VendorDetailPage } from './features/vendors/VendorDetailPage';
 import { PaymentListPage } from './features/payments/PaymentListPage';
 import { ExchangePage } from './features/exchange/ExchangePage';
 import { OrdersKanbanPage } from './features/orders/OrdersKanbanPage';
@@ -55,6 +56,7 @@ export function App() {
 
           {/* Vendors */}
           <Route path="/vendors" element={<VendorListPage />} />
+          <Route path="/vendors/:id" element={<VendorDetailPage />} />
 
           {/* Payments & Collections */}
           <Route path="/payments" element={<PaymentListPage />} />

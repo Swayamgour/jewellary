@@ -12,7 +12,10 @@ import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { CustomerPicker } from '../billing/CustomerPicker';
+import { CustomerSelectModal } from '../billing/CustomerSelectModal';
 import { formatCurrency, formatWeight, formatDate } from '../../utils/formatters';
+import { getErrorMessage } from '../../utils/errors';
 import { toast } from 'sonner';
 
 const STATUS_COLUMNS = [
@@ -29,47 +32,59 @@ export const OrdersKanbanPage = () => {
   const [karigarModalOpen, setKarigarModalOpen] = useState(false);
   const [selectedOrderForKarigar, setSelectedOrderForKarigar] = useState(null);
 
-  const { data: orderData, isLoading } = useGetOrdersQuery();
-  const { data: custData } = useGetCustomersQuery();
+  const { data: orderData, isLoading } = useGetOrdersQuery({ limit: 200 });
 
   const [createOrder, { isLoading: isCreating }] = useCreateOrderMutation();
   const [updateOrderStatus] = useUpdateOrderStatusMutation();
   const [assignKarigar, { isLoading: isAssigning }] = useAssignKarigarMutation();
 
   const orders = orderData?.data || [];
-  const customers = custData?.data || [];
 
   // Create Order Form State
-  const [customerId, setCustomerId] = useState('');
+  const [customer, setCustomer] = useState(null);
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [expectedDate, setExpectedDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 14);
     return d.toISOString().split('T')[0];
   });
-  const [designName, setDesignName] = useState('Custom Antique Gold Bridal Set');
-  const [estimatedGrossWeight, setEstimatedGrossWeight] = useState('35.0');
-  const [estimatedNetWeight, setEstimatedNetWeight] = useState('32.0');
-  const [goldRateLocked, setGoldRateLocked] = useState('7195');
-  const [totalEstimatedAmount, setTotalEstimatedAmount] = useState('245000');
-  const [advancePaid, setAdvancePaid] = useState('50000');
-  const [specialInstructions, setSpecialInstructions] = useState('High polish matte finish, 2.6 bangle size');
+  const [designName, setDesignName] = useState('');
+  const [estimatedGrossWeight, setEstimatedGrossWeight] = useState('');
+  const [estimatedNetWeight, setEstimatedNetWeight] = useState('');
+  const [goldRateLocked, setGoldRateLocked] = useState('');
+  const [totalEstimatedAmount, setTotalEstimatedAmount] = useState('');
+  const [advancePaid, setAdvancePaid] = useState('');
+  const [advanceMode, setAdvanceMode] = useState('CASH');
+  const [specialInstructions, setSpecialInstructions] = useState('');
 
   // Karigar State
-  const [karigarName, setKarigarName] = useState('');
-  const [karigarPhone, setKarigarPhone] = useState('');
-  const [karigarMakingCharges, setKarigarMakingCharges] = useState('');
+  const [artisanName, setArtisanName] = useState('');
+  const [artisanPhone, setArtisanPhone] = useState('');
+  const [expectedCompletion, setExpectedCompletion] = useState('');
+
+  const resetForm = () => {
+    setCustomer(null); setDesignName(''); setEstimatedGrossWeight(''); setEstimatedNetWeight('');
+    setGoldRateLocked(''); setTotalEstimatedAmount(''); setAdvancePaid(''); setSpecialInstructions('');
+  };
 
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
-    const activeCustomerId = customerId || customers[0]?._id;
-    if (!activeCustomerId) {
-      toast.error('Please select customer');
+    if (!customer) {
+      toast.error('Please select a customer');
+      return;
+    }
+    if (!designName || !(parseFloat(estimatedGrossWeight) > 0) || !(parseFloat(estimatedNetWeight) > 0) || !(parseFloat(totalEstimatedAmount) > 0)) {
+      toast.error('Fill design name, weights and the estimated amount');
+      return;
+    }
+    if (parseFloat(estimatedNetWeight) > parseFloat(estimatedGrossWeight)) {
+      toast.error('Net weight cannot exceed gross weight');
       return;
     }
 
     try {
       const payload = {
-        customerId: activeCustomerId,
+        customerId: customer._id,
         expectedDeliveryDate: new Date(expectedDate),
         items: [
           {
@@ -85,45 +100,55 @@ export const OrdersKanbanPage = () => {
         ],
         totalEstimatedAmount: parseFloat(totalEstimatedAmount),
         advancePaid: parseFloat(advancePaid) || 0,
+        paymentMode: advanceMode,
         notes: specialInstructions
       };
 
-      await createOrder(payload).unwrap();
-      toast.success('Custom manufacturing order created!');
+      const res = await createOrder(payload).unwrap();
+      toast.success(`Order ${res.data?.orderNo} created`);
       setCreateModalOpen(false);
+      resetForm();
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to create order');
+      toast.error(getErrorMessage(err, 'Failed to create order'));
     }
   };
 
   const handleAdvanceStatus = async (order, nextStatus) => {
     try {
-      await updateOrderStatus({
-        id: order._id,
-        status: nextStatus,
-        remarks: `Advanced status to ${nextStatus}`
-      }).unwrap();
+      await updateOrderStatus({ id: order._id, status: nextStatus }).unwrap();
       toast.success(`Order moved to ${nextStatus}`);
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to update order status');
+      toast.error(getErrorMessage(err, 'Failed to update order status'));
+    }
+  };
+
+  const handleCancel = async (order) => {
+    if (!window.confirm(`Cancel order ${order.orderNo}?`)) return;
+    try {
+      await updateOrderStatus({ id: order._id, status: 'CANCELLED' }).unwrap();
+      toast.success('Order cancelled');
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Failed to cancel order'));
     }
   };
 
   const handleKarigarSubmit = async (e) => {
     e.preventDefault();
     if (!selectedOrderForKarigar) return;
+    if (!artisanName.trim()) return toast.error('Enter the karigar / artisan name');
 
     try {
       await assignKarigar({
         id: selectedOrderForKarigar._id,
-        karigarName,
-        karigarPhone: karigarPhone || undefined,
-        makingCharges: parseFloat(karigarMakingCharges) || 0
+        artisanName: artisanName.trim(),
+        phone: artisanPhone || undefined,
+        expectedCompletionDate: expectedCompletion || undefined
       }).unwrap();
-      toast.success(`Assigned to Karigar ${karigarName}`);
+      toast.success(`Assigned to ${artisanName}`);
       setKarigarModalOpen(false);
+      setArtisanName(''); setArtisanPhone(''); setExpectedCompletion('');
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to assign karigar');
+      toast.error(getErrorMessage(err, 'Failed to assign karigar'));
     }
   };
 
@@ -210,10 +235,10 @@ export const OrdersKanbanPage = () => {
                         <span className="font-bold text-amber-600">Due: {formatCurrency(balance)}</span>
                       </div>
 
-                      {order.karigar?.name && (
+                      {order.karigarDetails?.artisanName && (
                         <div className="p-1.5 rounded-md bg-purple-50 text-purple-900 text-[10px] font-semibold flex items-center gap-1">
                           <Hammer className="w-3 h-3 text-purple-600" />
-                          <span>Karigar: {order.karigar.name}</span>
+                          <span>Karigar: {order.karigarDetails.artisanName}</span>
                         </div>
                       )}
 
@@ -267,6 +292,16 @@ export const OrdersKanbanPage = () => {
                             Mark Delivered
                           </button>
                         )}
+                        {['NEW', 'CONFIRMED', 'MANUFACTURING', 'READY'].includes(order.status) && (
+                          <button
+                            type="button"
+                            onClick={() => handleCancel(order)}
+                            className="text-[10px] font-bold text-red-500 hover:text-red-700 px-1"
+                            title="Cancel order"
+                          >
+                            ✕
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -293,20 +328,9 @@ export const OrdersKanbanPage = () => {
       >
         <form onSubmit={handleCreateSubmit} className="space-y-4 text-xs">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-bold uppercase text-surface-600">Customer *</label>
-              <select
-                value={customerId || (customers[0]?._id || '')}
-                onChange={(e) => setCustomerId(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-surface-300 p-2 font-semibold bg-white"
-                required
-              >
-                {customers.map((c) => (
-                  <option key={c._id} value={c._id}>
-                    {c.name} (📞 {c.mobile})
-                  </option>
-                ))}
-              </select>
+            <div className="sm:col-span-2">
+              <label className="text-[11px] font-bold uppercase text-surface-600 block mb-1">Customer *</label>
+              <CustomerPicker value={customer} onChange={setCustomer} onCreateNew={() => setCustomerModalOpen(true)} />
             </div>
 
             <Input
@@ -366,13 +390,19 @@ export const OrdersKanbanPage = () => {
               value={advancePaid}
               onChange={(e) => setAdvancePaid(e.target.value)}
             />
-            <Input
-              label="Special Crafting Instructions"
-              value={specialInstructions}
-              onChange={(e) => setSpecialInstructions(e.target.value)}
-              placeholder="e.g. Antique polish, rhodium highlights"
-            />
+            <div>
+              <label className="text-[11px] font-bold uppercase text-surface-600">Advance Mode</label>
+              <select value={advanceMode} onChange={(e) => setAdvanceMode(e.target.value)} className="mt-1 w-full rounded-lg border border-surface-300 p-2 font-semibold bg-white">
+                <option value="CASH">Cash</option><option value="UPI">UPI</option><option value="CARD">Card</option><option value="BANK_TRANSFER">Bank Transfer</option>
+              </select>
+            </div>
           </div>
+          <Input
+            label="Special Crafting Instructions"
+            value={specialInstructions}
+            onChange={(e) => setSpecialInstructions(e.target.value)}
+            placeholder="e.g. Antique polish, rhodium highlights"
+          />
 
           <div className="flex justify-end gap-3 pt-3 border-t border-surface-200">
             <Button variant="outline" type="button" onClick={() => setCreateModalOpen(false)}>
@@ -396,23 +426,22 @@ export const OrdersKanbanPage = () => {
           <form onSubmit={handleKarigarSubmit} className="space-y-4 text-xs">
             <Input
               label="Karigar / Artisan Name *"
-              value={karigarName}
-              onChange={(e) => setKarigarName(e.target.value)}
+              value={artisanName}
+              onChange={(e) => setArtisanName(e.target.value)}
               placeholder="e.g. Ramesh Babubhai Soni"
               required
             />
             <Input
               label="Karigar Phone / Mobile"
-              value={karigarPhone}
-              onChange={(e) => setKarigarPhone(e.target.value)}
+              value={artisanPhone}
+              onChange={(e) => setArtisanPhone(e.target.value)}
               placeholder="9820011223"
             />
             <Input
-              label="Agreed Karigar Making Charges (₹)"
-              type="number"
-              value={karigarMakingCharges}
-              onChange={(e) => setKarigarMakingCharges(e.target.value)}
-              placeholder="e.g. 4500"
+              label="Expected Completion Date"
+              type="date"
+              value={expectedCompletion}
+              onChange={(e) => setExpectedCompletion(e.target.value)}
             />
 
             <div className="flex justify-end gap-3 pt-3 border-t border-surface-200">
@@ -426,6 +455,7 @@ export const OrdersKanbanPage = () => {
           </form>
         </Modal>
       )}
+      <CustomerSelectModal isOpen={customerModalOpen} onClose={() => setCustomerModalOpen(false)} onCustomerCreated={setCustomer} />
     </div>
   );
 };

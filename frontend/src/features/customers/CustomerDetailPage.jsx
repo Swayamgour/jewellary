@@ -36,7 +36,7 @@ export const CustomerDetailPage = () => {
   const { data: paymentsData, isLoading: payLoading } = useGetCustomerPaymentsQuery({ id });
 
   const customer = custData?.data;
-  const ledgerEntries = ledgerData?.data?.entries || ledgerData?.data || [];
+  const ledgerEntries = ledgerData?.data?.transactions || [];
   const bills = billsData?.data || [];
   const payments = paymentsData?.data || [];
 
@@ -70,8 +70,8 @@ export const CustomerDetailPage = () => {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-black text-surface-900 font-display">{customer.name}</h1>
-              <Badge variant={customer.currentBalance > 0 ? 'warning' : 'success'}>
-                {customer.currentBalance > 0 ? 'Balance Due' : 'Account Clear'}
+              <Badge variant={customer.currentBalance > 0 ? 'warning' : customer.currentBalance < 0 ? 'info' : 'success'}>
+                {customer.currentBalance > 0 ? 'Balance Due' : customer.currentBalance < 0 ? 'Has Credit' : 'Account Clear'}
               </Badge>
             </div>
             <div className="flex flex-wrap gap-4 text-xs text-surface-500 mt-1">
@@ -97,10 +97,11 @@ export const CustomerDetailPage = () => {
             Outstanding Receivable
           </span>
           <p
-            className={`text-2xl font-black font-display mt-0.5 ${customer.currentBalance > 0 ? 'text-amber-600' : 'text-emerald-700'
+            className={`text-2xl font-black font-display mt-0.5 ${customer.currentBalance > 0 ? 'text-amber-600' : customer.currentBalance < 0 ? 'text-emerald-700' : 'text-surface-500'
               }`}
           >
-            {formatCurrency(customer.currentBalance)}
+            {customer.currentBalance !== 0 ? formatCurrency(Math.abs(customer.currentBalance)) : formatCurrency(0)}
+            {customer.currentBalance < 0 ? ' (credit)' : ''}
           </p>
         </div>
       </div>
@@ -130,25 +131,20 @@ export const CustomerDetailPage = () => {
               <Table
                 headers={[
                   'Date',
-                  'Transaction Type',
-                  'Reference No',
-                  { label: 'Debit (+ Due)', align: 'right' },
-                  { label: 'Credit (- Paid)', align: 'right' },
+                  'Type',
+                  { label: 'Debit (they owe)', align: 'right' },
+                  { label: 'Credit (settled)', align: 'right' },
                   { label: 'Running Balance', align: 'right' },
                   'Description'
                 ]}
               >
-                {console.log('Ledger Entries:', ledgerEntries)}
-                {ledgerEntries?.transactions?.map((entry, idx) => (
+                {ledgerEntries.map((entry, idx) => (
                   <TableRow key={entry._id || idx}>
                     <TableCell className="text-surface-500">
                       {formatDate(entry.transactionDate || entry.createdAt)}
                     </TableCell>
                     <TableCell className="font-bold text-surface-800 text-xs">
-                      {entry.transactionType}
-                    </TableCell>
-                    <TableCell className="font-mono text-surface-900 font-semibold">
-                      {entry.referenceNo || '-'}
+                      {entry.entryType}
                     </TableCell>
                     <TableCell align="right" className="font-bold text-surface-900">
                       {entry.debit > 0 ? formatCurrency(entry.debit) : '-'}
@@ -156,8 +152,8 @@ export const CustomerDetailPage = () => {
                     <TableCell align="right" className="font-bold text-emerald-700">
                       {entry.credit > 0 ? formatCurrency(entry.credit) : '-'}
                     </TableCell>
-                    <TableCell align="right" className="font-extrabold text-surface-900 font-mono">
-                      {formatCurrency(entry.runningBalance || entry.balance)}
+                    <TableCell align="right" className={`font-extrabold font-mono ${entry.runningBalance > 0 ? 'text-amber-600' : entry.runningBalance < 0 ? 'text-emerald-700' : 'text-surface-900'}`}>
+                      {formatCurrency(entry.runningBalance)}
                     </TableCell>
                     <TableCell className="text-surface-500 text-xs truncate max-w-xs">
                       {entry.description || '-'}
@@ -217,8 +213,8 @@ export const CustomerDetailPage = () => {
                       {formatCurrency(b.paymentSummary?.due || 0)}
                     </TableCell>
                     <TableCell align="center">
-                      <Badge variant={b.paymentStatus === 'PAID' ? 'success' : 'warning'} size="sm">
-                        {b.paymentStatus || b.status}
+                      <Badge variant={b.status !== 'CONFIRMED' ? 'default' : b.paymentStatus === 'PAID' ? 'success' : 'warning'} size="sm">
+                        {b.status === 'CONFIRMED' ? b.paymentStatus : b.status}
                       </Badge>
                     </TableCell>
                   </TableRow>

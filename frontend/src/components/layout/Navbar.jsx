@@ -151,12 +151,12 @@ export const Navbar = ({ onOpenSidebar, onOpenSearch, onOpenGoldRates }) => {
         </div>
 
         {/* Branch Display */}
-        {branch && (
+        {/* {branch && (
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-100 border border-surface-200 text-xs text-surface-700 font-medium">
             <Building className="w-3.5 h-3.5 text-surface-500" />
             <span className="truncate max-w-[130px]">{branch.code || branch.name || 'Main Branch'}</span>
           </div>
-        )}
+        )} */}
 
         {/* User Profile Dropdown */}
         <div className="relative">

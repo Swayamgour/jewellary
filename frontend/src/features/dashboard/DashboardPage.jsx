@@ -129,17 +129,13 @@ export const DashboardPage = () => {
               subtitle={`${dashboard?.sales?.invoiceCount || 0} Bills Generated`}
               icon={TrendingUp}
               variant="gold"
-              trend="+12.5%"
-              trendType="up"
             />
             <StatCard
-              title="Total Purchases"
-              value={formatCurrency(dashboard?.purchases?.totalPurchase)}
-              subtitle={`${dashboard?.purchases?.purchaseCount || 0} Purchase Orders`}
+              title="Net Purchases"
+              value={formatCurrency(dashboard?.purchases?.netPurchase)}
+              subtitle={`${dashboard?.purchases?.purchaseCount || 0} Purchases (after returns)`}
               icon={Truck}
               variant="default"
-              trend="+8.4%"
-              trendType="up"
             />
             <StatCard
               title="Customer Receivable"
@@ -189,7 +185,7 @@ export const DashboardPage = () => {
             <StatCard
               title="Operating Expenses"
               value={formatCurrency(dashboard?.financials?.totalExpenses)}
-              subtitle={`Net Profit: ${formatCurrency(dashboard?.financials?.estimatedNetProfit)}`}
+              subtitle={`Net Profit: ${formatCurrency(dashboard?.financials?.netProfit)}`}
               icon={ArrowDownCircle}
               variant="default"
             />

@@ -14,14 +14,16 @@ import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { StatCard } from '../../components/ui/StatCard';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { Pagination } from '../../components/ui/Pagination';
 import { formatCurrency, formatDate } from '../../utils/formatters';
+import { getErrorMessage } from '../../utils/errors';
 import { toast } from 'sonner';
 
 export const ExpenseListPage = () => {
   const [modalOpen, setModalOpen] = useState(false);
-  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
 
-  const { data: expenseData, isLoading } = useGetExpensesQuery();
+  const { data: expenseData, isLoading } = useGetExpensesQuery({ page, limit: 20 });
   const { data: dashToday } = useGetDashboardQuery({ filter: 'today' });
   const { data: dashMonth } = useGetDashboardQuery({ filter: 'month' });
 
@@ -59,7 +61,7 @@ export const ExpenseListPage = () => {
       setTitle('');
       setAmount('');
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to record expense');
+      toast.error(getErrorMessage(err, 'Failed to record expense'));
     }
   };
 
@@ -69,7 +71,7 @@ export const ExpenseListPage = () => {
         await deleteExpense(id).unwrap();
         toast.success('Expense deleted');
       } catch (err) {
-        toast.error(err?.data?.message || 'Failed to delete expense');
+        toast.error(getErrorMessage(err, 'Failed to delete expense'));
       }
     }
   };
@@ -175,6 +177,7 @@ export const ExpenseListPage = () => {
             ))}
           </Table>
         )}
+        <Pagination pagination={expenseData?.pagination} onPage={setPage} />
       </div>
 
       {/* Add Expense Modal */}

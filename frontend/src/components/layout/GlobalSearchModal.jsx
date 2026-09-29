@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Receipt, Users, Package, ArrowRight, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useGetInventoryQuery, useGetCustomersQuery, useGetPakkaBillsQuery } from '../../app/api/baseApi';
+import { useGetInventoryQuery, useGetCustomersQuery, useGetInvoicesQuery } from '../../app/api/baseApi';
 import { formatCurrency } from '../../utils/formatters';
 
 export const GlobalSearchModal = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const navigate = useNavigate();
 
-  const { data: invData } = useGetInventoryQuery({ search: searchTerm }, { skip: !searchTerm || searchTerm.length < 2 });
-  const { data: custData } = useGetCustomersQuery({ search: searchTerm }, { skip: !searchTerm || searchTerm.length < 2 });
-  const { data: billData } = useGetPakkaBillsQuery({ search: searchTerm }, { skip: !searchTerm || searchTerm.length < 2 });
+  const { data: invData } = useGetInventoryQuery({ search: searchTerm, limit: 6 }, { skip: !searchTerm || searchTerm.length < 2 });
+  const { data: custData } = useGetCustomersQuery({ search: searchTerm, limit: 6 }, { skip: !searchTerm || searchTerm.length < 2 });
+  const { data: billData } = useGetInvoicesQuery({ search: searchTerm, limit: 6 }, { skip: !searchTerm || searchTerm.length < 2 });
 
   useEffect(() => {
     const handleKeyDown = (e) => {

@@ -9,14 +9,18 @@ import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { CustomerSelectModal } from '../billing/CustomerSelectModal';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { Pagination } from '../../components/ui/Pagination';
+import { useDebounce } from '../../utils/useDebounce';
+import { absCurrency } from '../../utils/formatters';
 
 export const CustomerListPage = () => {
   const navigate = useNavigate();
-  const [search, setSearch] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(1);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const search = useDebounce(searchTerm, 350);
 
-  const { data: customerData, isLoading } = useGetCustomersQuery({ search });
+  const { data: customerData, isLoading } = useGetCustomersQuery({ search: search || undefined, page, limit: 20 });
   const customers = customerData?.data || [];
 
   return (
@@ -46,8 +50,8 @@ export const CustomerListPage = () => {
             <Input
               placeholder="Search customers by name, phone or GSTIN..."
               icon={Search}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={searchTerm}
+              onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
             />
           </div>
         </div>
@@ -83,7 +87,7 @@ export const CustomerListPage = () => {
                   📞 {c.mobile}
                 </TableCell>
                 <TableCell className="text-surface-500">
-                  {c.address?.city || 'Mumbai'}, {c.address?.state || 'MH'}
+                  {c.address?.city || '-'}{c.address?.state ? `, ${c.address.state}` : ''}
                 </TableCell>
                 <TableCell className="font-mono text-surface-600">
                   {c.gstin || '-'}
@@ -91,10 +95,10 @@ export const CustomerListPage = () => {
                 <TableCell
                   align="right"
                   className={`font-bold ${
-                    c.currentBalance > 0 ? 'text-amber-600' : 'text-emerald-700'
+                    c.currentBalance > 0 ? 'text-amber-600' : c.currentBalance < 0 ? 'text-emerald-700' : 'text-surface-400'
                   }`}
                 >
-                  {formatCurrency(c.currentBalance)}
+                  {c.currentBalance > 0 ? absCurrency(c.currentBalance) : c.currentBalance < 0 ? `Cr ${absCurrency(c.currentBalance)}` : '—'}
                 </TableCell>
                 <TableCell align="center">
                   <Badge variant={c.isActive !== false ? 'success' : 'default'} size="sm">
@@ -115,6 +119,7 @@ export const CustomerListPage = () => {
             ))}
           </Table>
         )}
+        <Pagination pagination={customerData?.pagination} onPage={setPage} />
       </div>
 
       <CustomerSelectModal

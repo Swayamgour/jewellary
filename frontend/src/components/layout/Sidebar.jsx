@@ -1,5 +1,8 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { useSelector } from 'react-redux';
+import { selectUserRole } from '../../features/auth/authSlice';
+import { canAccess } from '../../utils/constants';
 import { clsx } from 'clsx';
 import {
   LayoutDashboard,
@@ -21,23 +24,25 @@ import {
 } from 'lucide-react';
 
 const navigationItems = [
-  { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-  { name: 'Billing / POS', path: '/billing', icon: Receipt, actionPath: '/billing/new' },
-  { name: 'Sales Orders', path: '/sales', icon: ShoppingCart },
-  { name: 'Purchases', path: '/purchases', icon: Truck },
-  { name: 'Inventory & Stock', path: '/inventory', icon: Package },
-  { name: 'Customers', path: '/customers', icon: Users },
-  { name: 'Vendors', path: '/vendors', icon: Briefcase },
-  { name: 'Payments & Cash', path: '/payments', icon: CreditCard },
-  { name: 'Old Gold / Exchange', path: '/exchange', icon: RefreshCw },
-  { name: 'Custom Orders', path: '/orders', icon: Clock },
-  { name: 'Expenses', path: '/expenses', icon: ArrowDownCircle },
-  { name: 'Reports Center', path: '/reports', icon: BarChart3 },
-  { name: 'Gold Rates', path: '/gold-rates', icon: Coins },
-  { name: 'Settings', path: '/settings', icon: Settings },
+  { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, key: 'dashboard' },
+  { name: 'Billing / POS', path: '/billing', icon: Receipt, actionPath: '/billing/new', key: 'billing' },
+  { name: 'Sales Orders', path: '/sales', icon: ShoppingCart, key: 'sales' },
+  { name: 'Purchases', path: '/purchases', icon: Truck, key: 'purchases' },
+  { name: 'Inventory & Stock', path: '/inventory', icon: Package, key: 'inventory' },
+  { name: 'Customers', path: '/customers', icon: Users, key: 'customers' },
+  { name: 'Vendors', path: '/vendors', icon: Briefcase, key: 'vendors' },
+  { name: 'Payments & Cash', path: '/payments', icon: CreditCard, key: 'payments' },
+  { name: 'Old Gold / Exchange', path: '/exchange', icon: RefreshCw, key: 'exchange' },
+  { name: 'Custom Orders', path: '/orders', icon: Clock, key: 'orders' },
+  { name: 'Expenses', path: '/expenses', icon: ArrowDownCircle, key: 'expenses' },
+  { name: 'Reports Center', path: '/reports', icon: BarChart3, key: 'reports' },
+  { name: 'Gold Rates', path: '/gold-rates', icon: Coins, key: 'goldRates' },
+  { name: 'Settings', path: '/settings', icon: Settings, key: 'settings' },
 ];
 
 export const Sidebar = ({ isOpen, onClose }) => {
+  const role = useSelector(selectUserRole);
+  const visibleItems = navigationItems.filter((item) => canAccess(role, item.key));
   return (
     <>
       {/* Mobile Backdrop */}
@@ -62,7 +67,7 @@ export const Sidebar = ({ isOpen, onClose }) => {
               <Coins className="w-5 h-5 text-surface-950" />
             </div>
             <div>
-              <span className="text-base font-extrabold tracking-tight text-surface-900 font-display">AURA JEWEL</span>
+              <span className="text-base font-extrabold tracking-tight text-surface-900 font-display">Jewellery</span>
               <span className="block text-[10px] uppercase font-bold tracking-widest text-gold-700">Enterprise ERP</span>
             </div>
           </div>
@@ -80,7 +85,7 @@ export const Sidebar = ({ isOpen, onClose }) => {
           <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-surface-400">
             Operations & POS
           </div>
-          {navigationItems.map((item) => {
+          {visibleItems.map((item) => {
             const Icon = item.icon;
             return (
               <div key={item.path} className="flex items-center group">
@@ -117,7 +122,7 @@ export const Sidebar = ({ isOpen, onClose }) => {
         </div>
 
         {/* Footer Info: POS Shortcut Guide */}
-        <div className="p-4 border-t border-surface-100 bg-surface-50/50">
+        {/* <div className="p-4 border-t border-surface-100 bg-surface-50/50">
           <div className="rounded-xl p-3 bg-surface-100 border border-surface-200/60 text-center">
             <span className="text-[11px] font-bold text-surface-800">POS Hotkeys Ready</span>
             <div className="flex justify-center gap-2 mt-1.5 text-[10px] font-mono text-surface-600">
@@ -126,7 +131,7 @@ export const Sidebar = ({ isOpen, onClose }) => {
               <span className="bg-white px-1.5 py-0.5 rounded border border-surface-200">F6: Item</span>
             </div>
           </div>
-        </div>
+        </div> */}
       </aside>
     </>
   );

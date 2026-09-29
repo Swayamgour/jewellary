@@ -5,6 +5,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { useConvertKachaToPakkaMutation } from '../../app/api/baseApi';
 import { formatCurrency } from '../../utils/formatters';
+import { getErrorMessage } from '../../utils/errors';
 import { toast } from 'sonner';
 
 export const ConvertKachaModal = ({ isOpen, onClose, kachaBill }) => {
@@ -20,7 +21,7 @@ export const ConvertKachaModal = ({ isOpen, onClose, kachaBill }) => {
       toast.success('Successfully converted to Pakka GST Invoice!');
       setConvertedInvoice(res.data);
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to convert bill to Pakka');
+      toast.error(getErrorMessage(err, 'Failed to convert bill to Pakka'));
     }
   };
 
@@ -61,7 +62,7 @@ export const ConvertKachaModal = ({ isOpen, onClose, kachaBill }) => {
           <div className="p-3 bg-surface-50 rounded-xl text-xs text-surface-600 border border-surface-200 text-left">
             <p className="font-semibold text-surface-800">Original Kacha: {kachaBill.invoiceNo}</p>
             <p className="mt-1">
-              Applied 3% GST. Inventory remains securely locked without duplicate deduction.
+              GST added; only the difference is posted to the customer ledger. Stock is not deducted again, and payments already received move to the Pakka invoice.
             </p>
           </div>
 
@@ -112,8 +113,7 @@ export const ConvertKachaModal = ({ isOpen, onClose, kachaBill }) => {
           <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <p>
-              This action will mark the Kacha bill as CONVERTED and create an authoritative Pakka GST
-              Invoice with 3% jewellery tax and HSN 7113.
+              This closes the Kacha bill as CONVERTED and creates a Pakka GST invoice (3% jewellery GST). Payments already received and old gold adjustments move to the Pakka invoice. A Kacha bill can be converted only once.
             </p>
           </div>
 

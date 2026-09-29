@@ -150,7 +150,7 @@ export const SettingsPage = () => {
       </div>
 
       {/* Backend API Health Status Indicator */}
-      <div className="p-4 bg-white rounded-2xl border border-surface-200 shadow-xs flex items-center justify-between text-xs">
+      {/* <div className="p-4 bg-white rounded-2xl border border-surface-200 shadow-xs flex items-center justify-between text-xs">
         <div className="flex items-center gap-3">
           <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
           <div>
@@ -161,7 +161,7 @@ export const SettingsPage = () => {
           </div>
         </div>
         <span className="font-mono text-surface-400 text-[11px]">v1.0.0-PROD</span>
-      </div>
+      </div> */}
     </div>
   );
 };

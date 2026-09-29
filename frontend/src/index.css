@@ -54,3 +54,11 @@
     border: none !important;
   }
 }
+
+/* small helpers used by modals / dropdowns (replaces tailwindcss-animate) */
+@keyframes erp-fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.animate-in { animation: erp-fade-in 0.18s ease-out both; }
+.fade-in, .slide-in-from-top-2 { }
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type='number'] { -moz-appearance: textfield; }

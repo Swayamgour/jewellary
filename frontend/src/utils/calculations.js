@@ -1,46 +1,48 @@
 /**
- * Frontend calculation helper mirroring backend calculation.service.js
- * Ensures instant UI feedback in POS while backend remains authoritative.
+ * Live-preview calculation for the POS. Mirrors backend calculation.service.js so the cashier sees
+ * (almost) exactly what the server will post. The BACKEND IS AUTHORITATIVE - the invoice that comes
+ * back from the API is what gets printed / stored.
+ *
+ *   net weight      = gross - stone                    (weights come from the stock record, per piece)
+ *   metal           = net x rate x qty
+ *   making          = PER_GRAM: gross x rate x qty | PERCENTAGE: metal% | FIXED: rate x qty
+ *   wastage         = net x wastage% x rate x qty
+ *   stone           = stoneAmount x qty
+ *   taxable (line)  = metal + making + wastage + stone - item discount
+ *   GST (PAKKA)     = 3% on (taxable - invoice discount): CGST+SGST 1.5+1.5 in-state, IGST 3 inter-state
  */
+const r2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const num = (v) => {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+export const GST_TOTAL_RATE = 3;
 
 export const calculateItemPrice = (item) => {
-  const grossWeight = parseFloat(item.grossWeight || 0);
-  const stoneWeight = parseFloat(item.stoneWeight || 0);
-  const netWeight = Math.max(0, grossWeight - stoneWeight);
-  const goldRate = parseFloat(item.goldRate || 0);
-  const quantity = parseInt(item.quantity || 1, 10);
+  const grossWeight = num(item.grossWeight);
+  const stoneWeight = num(item.stoneWeight);
+  const netWeight = Math.max(0, Math.round((grossWeight - stoneWeight) * 1000) / 1000);
+  const goldRate = num(item.goldRate);
+  const quantity = Math.max(1, parseInt(item.quantity || 1, 10) || 1);
 
-  // 1. Metal Value
-  const singleGoldAmount = netWeight * goldRate;
-  const goldAmount = singleGoldAmount * quantity;
+  const goldAmount = r2(netWeight * quantity * goldRate);
 
-  // 2. Making Charges
-  let singleMakingAmount = 0;
   const makingType = item.makingType || 'PER_GRAM';
-  const makingRate = parseFloat(item.makingRate || 0);
+  const makingRate = num(item.makingRate);
+  let makingAmount = 0;
+  if (makingType === 'PERCENTAGE') makingAmount = r2((goldAmount * makingRate) / 100);
+  else if (makingType === 'PER_GRAM') makingAmount = r2(grossWeight * quantity * makingRate);
+  else makingAmount = r2(makingRate * quantity);
 
-  if (makingType === 'PERCENTAGE') {
-    singleMakingAmount = (singleGoldAmount * makingRate) / 100;
-  } else if (makingType === 'PER_GRAM') {
-    singleMakingAmount = grossWeight * makingRate;
-  } else if (makingType === 'FIXED') {
-    singleMakingAmount = makingRate;
-  }
-  const makingAmount = singleMakingAmount * quantity;
+  const wastagePercent = num(item.wastagePercent);
+  const wastageAmount = r2(netWeight * quantity * (wastagePercent / 100) * goldRate);
 
-  // 3. Wastage Charges (Net Weight * Wastage% * Gold Rate)
-  const wastagePercent = parseFloat(item.wastagePercent || 0);
-  const singleWastageWeight = netWeight * (wastagePercent / 100);
-  const singleWastageAmount = singleWastageWeight * goldRate;
-  const wastageAmount = singleWastageAmount * quantity;
+  const stoneAmount = r2(num(item.stoneAmount) * quantity);
+  const discount = r2(num(item.discount));
 
-  // 4. Stone charges & discount
-  const stoneAmount = (parseFloat(item.stoneAmount || 0)) * quantity;
-  const discount = parseFloat(item.discount || 0);
-
-  // 5. Taxable Amount
-  const itemPreDiscount = goldAmount + makingAmount + wastageAmount + stoneAmount;
-  const taxableAmount = Math.max(0, itemPreDiscount - discount);
+  const preDiscount = r2(goldAmount + makingAmount + wastageAmount + stoneAmount);
+  const taxableAmount = Math.max(0, r2(preDiscount - discount));
 
   return {
     ...item,
@@ -57,17 +59,13 @@ export const calculateItemPrice = (item) => {
     wastageAmount,
     stoneAmount,
     discount,
+    preDiscount,
     taxableAmount,
     totalAmount: taxableAmount
   };
 };
 
-export const calculateInvoiceTotals = ({
-  items = [],
-  billType = 'KACHA',
-  isInterState = false,
-  extraDiscount = 0
-}) => {
+export const calculateInvoiceTotals = ({ items = [], billType = 'KACHA', isInterState = false, extraDiscount = 0 }) => {
   let subtotal = 0;
   let itemsDiscount = 0;
   let totalGoldAmount = 0;
@@ -82,55 +80,64 @@ export const calculateInvoiceTotals = ({
     totalWastageAmount += calc.wastageAmount;
     totalStoneAmount += calc.stoneAmount;
     itemsDiscount += calc.discount;
-    subtotal += calc.goldAmount + calc.makingAmount + calc.wastageAmount + calc.stoneAmount;
+    subtotal += calc.preDiscount;
     return calc;
   });
 
-  const totalDiscount = itemsDiscount + parseFloat(extraDiscount || 0);
-  const taxableAmount = Math.max(0, subtotal - totalDiscount);
+  subtotal = r2(subtotal);
+  itemsDiscount = r2(itemsDiscount);
+  const invoiceDiscount = r2(num(extraDiscount));
+  const afterItemDiscount = r2(subtotal - itemsDiscount);
 
-  let tax = {
-    isInterState: Boolean(isInterState),
-    cgstRate: 0,
-    cgstAmount: 0,
-    sgstRate: 0,
-    sgstAmount: 0,
-    igstRate: 0,
-    igstAmount: 0,
-    totalTax: 0
-  };
+  // The API rejects an invoice discount bigger than the bill - flag it here so the cashier sees it first
+  const discountError =
+    invoiceDiscount < 0
+      ? 'Discount cannot be negative'
+      : invoiceDiscount > afterItemDiscount
+      ? `Discount cannot exceed ${afterItemDiscount}`
+      : null;
+  const itemDiscountError = calculatedItems.some((i) => i.discount > i.preDiscount)
+    ? 'An item discount is bigger than the item value'
+    : null;
+
+  const totalDiscount = r2(itemsDiscount + (discountError ? 0 : invoiceDiscount));
+  const taxableAmount = Math.max(0, r2(subtotal - totalDiscount));
+
+  const tax = { isInterState: Boolean(isInterState), cgstRate: 0, cgstAmount: 0, sgstRate: 0, sgstAmount: 0, igstRate: 0, igstAmount: 0, totalTax: 0 };
 
   if (billType === 'PAKKA') {
     if (isInterState) {
-      tax.igstRate = 3.0;
-      tax.igstAmount = (taxableAmount * 3.0) / 100;
+      tax.igstRate = 3;
+      tax.igstAmount = r2((taxableAmount * 3) / 100);
       tax.totalTax = tax.igstAmount;
     } else {
       tax.cgstRate = 1.5;
-      tax.cgstAmount = (taxableAmount * 1.5) / 100;
+      tax.cgstAmount = r2((taxableAmount * 1.5) / 100);
       tax.sgstRate = 1.5;
-      tax.sgstAmount = (taxableAmount * 1.5) / 100;
-      tax.totalTax = tax.cgstAmount + tax.sgstAmount;
+      tax.sgstAmount = r2((taxableAmount * 1.5) / 100);
+      tax.totalTax = r2(tax.cgstAmount + tax.sgstAmount);
     }
   }
 
-  const preRound = taxableAmount + tax.totalTax;
+  const preRound = r2(taxableAmount + tax.totalTax);
   const grandTotal = Math.round(preRound);
-  const roundOff = Number((grandTotal - preRound).toFixed(2));
+  const roundOff = r2(grandTotal - preRound);
 
   return {
     items: calculatedItems,
     breakdown: {
-      goldAmount: totalGoldAmount,
-      makingAmount: totalMakingAmount,
-      wastageAmount: totalWastageAmount,
-      stoneAmount: totalStoneAmount
+      goldAmount: r2(totalGoldAmount),
+      makingAmount: r2(totalMakingAmount),
+      wastageAmount: r2(totalWastageAmount),
+      stoneAmount: r2(totalStoneAmount)
     },
     subtotal,
+    itemsDiscount,
     discount: totalDiscount,
     taxableAmount,
     tax,
     roundOff,
-    grandTotal
+    grandTotal,
+    error: discountError || itemDiscountError
   };
 };

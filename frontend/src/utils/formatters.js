@@ -26,6 +26,20 @@ export const formatWeight = (grams, precision = 3) => {
   return `${Number(grams).toFixed(precision)} g`;
 };
 
+export const formatNumber = (n, digits = 0) => {
+  if (n === undefined || n === null || isNaN(n)) return '0';
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(n);
+};
+
+// Party balance: > 0 means the other side owes us (customer) / we owe them (vendor); < 0 is the opposite (credit / advance)
+export const absCurrency = (amount) => formatCurrency(Math.abs(amount || 0));
+
+export const todayISO = () => new Date().toISOString().slice(0, 10);
+export const monthStartISO = () => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1).toLocaleDateString('en-CA');
+};
+
 export const formatDate = (date) => {
   if (!date) return '-';
   const d = new Date(date);

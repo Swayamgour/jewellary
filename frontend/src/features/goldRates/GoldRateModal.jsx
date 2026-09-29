@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useGetCurrentGoldRatesQuery, useSetGoldRateMutation } from '../../app/api/baseApi';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
+import { getErrorMessage } from '../../utils/errors';
 import { toast } from 'sonner';
 
 export const GoldRateModal = ({ isOpen, onClose }) => {
@@ -33,7 +34,7 @@ export const GoldRateModal = ({ isOpen, onClose }) => {
       toast.success(`${purity} ${metal} rate updated to ${formatCurrency(rate)}/g`);
       setRate('');
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to update gold rate');
+      toast.error(getErrorMessage(err, 'Failed to update gold rate'));
     }
   };
 

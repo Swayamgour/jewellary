@@ -1,318 +1,222 @@
-import React, { useState } from 'react';
-import {
-  BarChart3,
-  FileSpreadsheet,
-  Printer,
-  Search,
-  Filter,
-  Download,
-  Calendar,
-  DollarSign
-} from 'lucide-react';
-import {
-  useGetSalesReportQuery,
-  useGetStockReportQuery,
-  useGetCustomerOutstandingReportQuery,
-  useGetVendorOutstandingReportQuery
-} from '../../app/api/baseApi';
-import { Table, TableRow, TableCell } from '../../components/ui/Table';
-import { TableSkeleton } from '../../components/ui/Skeleton';
+import React, { useState, useMemo } from 'react';
+import { BarChart3, Printer, Download, Calendar, RefreshCcw, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { useGetReportQuery, useGetReconciliationQuery, useFixReconciliationMutation } from '../../app/api/baseApi';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { Tabs } from '../../components/ui/Tabs';
 import { Badge } from '../../components/ui/Badge';
-import { formatCurrency, formatWeight, formatDate } from '../../utils/formatters';
+import { TableSkeleton } from '../../components/ui/Skeleton';
+import { downloadFile } from '../../utils/download';
+import { formatCurrency, formatWeight, formatDate, todayISO, monthStartISO } from '../../utils/formatters';
+import { getErrorMessage } from '../../utils/errors';
 import { toast } from 'sonner';
 
+// key -> label, whether it needs a date range, and which extra filter (if any) it accepts
+const REPORTS = [
+  { group: 'Sales', items: [
+    { key: 'sales', label: 'Sales Register', dated: true },
+    { key: 'sales-returns', label: 'Sales Returns', dated: true }
+  ]},
+  { group: 'Purchase', items: [
+    { key: 'purchase', label: 'Purchase Register', dated: true },
+    { key: 'purchase-returns', label: 'Purchase Returns', dated: true }
+  ]},
+  { group: 'Money', items: [
+    { key: 'payments', label: 'Payments', dated: true },
+    { key: 'collections', label: 'Collections (net cash)', dated: true },
+    { key: 'cash-summary', label: 'Cash Summary by Mode', dated: true },
+    { key: 'expenses', label: 'Expenses', dated: true },
+    { key: 'profit-loss', label: 'Profit & Loss', dated: true }
+  ]},
+  { group: 'Old Gold', items: [
+    { key: 'exchange', label: 'Exchange Register', dated: true },
+    { key: 'old-gold', label: 'Old Gold Composition', dated: true }
+  ]},
+  { group: 'Stock', items: [
+    { key: 'stock', label: 'Stock Valuation', dated: false },
+    { key: 'gold-stock', label: 'Gold Stock', dated: false },
+    { key: 'silver-stock', label: 'Silver Stock', dated: false },
+    { key: 'stock-movement', label: 'Stock Movement', dated: true }
+  ]},
+  { group: 'Outstanding', items: [
+    { key: 'customer-outstanding', label: 'Customer Outstanding', dated: false },
+    { key: 'vendor-outstanding', label: 'Vendor Outstanding', dated: false }
+  ]}
+];
+const ALL_ITEMS = REPORTS.flatMap((g) => g.items);
+
+const SUMMARY_LABELS = {
+  count: 'Records', totalSales: 'Total Sales', netSales: 'Net Sales', totalTaxable: 'Taxable', totalTax: 'GST',
+  totalReturned: 'Returned', totalPaid: 'Paid', totalDue: 'Due', totalPurchase: 'Total Purchase', netPurchase: 'Net Purchase',
+  totalRefundDue: 'Refund Due', totalIn: 'Total In', totalOut: 'Total Out', net: 'Net', received: 'Received',
+  refunded: 'Refunded', netCollection: 'Net Collection', oldGoldAdjusted: 'Old Gold Used', totalExpense: 'Total Expense',
+  netProfit: 'Net Profit', grossProfit: 'Gross Profit', netSalesPL: 'Net Sales', costOfGoodsSold: 'COGS',
+  operatingExpenses: 'Expenses', totalValue: 'Total Value', totalAdjusted: 'Adjusted', totalPaidOut: 'Paid Out',
+  totalUnused: 'Unused', totalPieces: 'Pieces', totalGrossWeight: 'Gross Wt', totalNetWeight: 'Net Wt',
+  totalValuation: 'Valuation', totalNetWeightOG: 'Net Wt', totalPureWeight: 'Pure Wt', customerCount: 'Customers',
+  totalOutstanding: 'Total Due', customersWithCredit: 'With Credit', totalCustomerCredit: 'Credit', vendorCount: 'Vendors',
+  totalPayable: 'Total Payable', vendorsWithAdvance: 'With Advance', totalVendorAdvance: 'Advance'
+};
+
+const isMoney = (k) => /total|amount|value|due|paid|received|refund|sales|purchase|expense|profit|net|collection|adjusted|credit|payable|valuation/i.test(k) && !/count|pieces|weight/i.test(k);
+const isWeight = (k) => /weight/i.test(k);
+
 export const ReportCenterPage = () => {
-  const [reportType, setReportType] = useState('SALES');
-  const [billTypeFilter, setBillTypeFilter] = useState('');
+  const [reportKey, setReportKey] = useState('sales');
+  const [startDate, setStartDate] = useState(monthStartISO());
+  const [endDate, setEndDate] = useState(todayISO());
+  const [showRecon, setShowRecon] = useState(false);
 
-  // Queries
-  const { data: salesData, isLoading: salesLoading } = useGetSalesReportQuery(
-    { billType: billTypeFilter || undefined },
-    { skip: reportType !== 'SALES' }
-  );
-  const { data: stockData, isLoading: stockLoading } = useGetStockReportQuery(
-    {},
-    { skip: reportType !== 'STOCK' }
-  );
-  const { data: custData, isLoading: custLoading } = useGetCustomerOutstandingReportQuery(
-    {},
-    { skip: reportType !== 'CUSTOMER_DUE' }
-  );
-  const { data: vendorData, isLoading: vendorLoading } = useGetVendorOutstandingReportQuery(
-    {},
-    { skip: reportType !== 'VENDOR_DUE' }
-  );
+  const meta = ALL_ITEMS.find((i) => i.key === reportKey);
+  const params = meta?.dated ? { key: reportKey, startDate, endDate } : { key: reportKey };
+  const { data, isLoading, isFetching } = useGetReportQuery(params);
+  const { data: reconData } = useGetReconciliationQuery(undefined, { skip: !showRecon });
+  const [fixRecon, { isLoading: fixing }] = useFixReconciliationMutation();
 
-  const handleExportExcel = () => {
-    const token = localStorage.getItem('token');
-    const typeParam = reportType === 'SALES' ? 'sales' : 'stock';
-    const url = `/api/reports/export/excel?reportType=${typeParam}`;
+  const report = data?.data;
+  const summary = report?.summary || {};
+  const rows = report?.data || [];
 
-    // Trigger download via window
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${typeParam}_report_${Date.now()}.xlsx`);
-    document.body.appendChild(link);
-    // Since fetch with auth header is better for JWT protected endpoints:
-    fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error('Excel export failed');
-        return res.blob();
-      })
-      .then((blob) => {
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = `Jewellery_ERP_${reportType}_Report.xlsx`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        toast.success('Excel report downloaded successfully!');
-      })
-      .catch((err) => {
-        toast.error('Failed to export Excel report. Please ensure permissions.');
-      });
+  const columns = useMemo(() => (rows.length ? Object.keys(rows[0]).filter((k) => typeof rows[0][k] !== 'object') : []), [rows]);
+
+  const exportExcel = async () => {
+    try {
+      await downloadFile('/reports/export/excel', { reportType: reportKey, ...(meta?.dated ? { startDate, endDate } : {}) }, `${reportKey}_${Date.now()}.xlsx`);
+      toast.success('Excel downloaded');
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Export failed'));
+    }
   };
 
-  const handlePrint = () => {
-    window.print();
+  const runFix = async () => {
+    try {
+      const res = await fixRecon().unwrap();
+      toast.success(`Fixed ${res.data.fixedDocuments} document(s)`);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Fix failed'));
+    }
   };
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div className="no-print flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-surface-900 font-display">Financial & Stock Reports</h1>
-          <p className="text-xs text-surface-500 mt-1">
-            Official sales audit, stock valuation, customer receivables, and supplier payables
-          </p>
+          <h1 className="text-2xl font-black text-surface-900 font-display">Reports</h1>
+          <p className="text-xs text-surface-500 mt-1">Sales, purchase, money, old-gold, stock and outstanding — every figure is derived live from the books</p>
         </div>
-
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" icon={Printer} onClick={handlePrint}>
-            Print Report
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            icon={FileSpreadsheet}
-            onClick={handleExportExcel}
-            className="font-bold shadow-sm"
-          >
-            Export to Excel (.xlsx)
-          </Button>
+          <Button variant="outline" size="sm" icon={ShieldCheck} onClick={() => setShowRecon(true)}>Books Check</Button>
+          <Button variant="outline" size="sm" icon={Printer} onClick={() => window.print()}>Print</Button>
+          <Button variant="primary" size="sm" icon={Download} onClick={exportExcel} className="font-bold">Export Excel</Button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="bg-white rounded-2xl border border-surface-200 p-4 shadow-xs space-y-4">
-        <div className="no-print">
-          <Tabs
-            tabs={[
-              { id: 'SALES', label: 'Sales & Revenue Summary', icon: BarChart3 },
-              { id: 'STOCK', label: 'Inventory & Vault Valuation', icon: DollarSign },
-              { id: 'CUSTOMER_DUE', label: 'Customer Receivables Due' },
-              { id: 'VENDOR_DUE', label: 'Vendor Payables' }
-            ]}
-            activeTab={reportType}
-            onChange={setReportType}
-          />
-        </div>
-
-        {/* Report 1: Sales Report */}
-        {reportType === 'SALES' && (
-          <div className="space-y-4">
-            <div className="no-print flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs">
-                <span className="font-semibold text-surface-600">Filter Bill Type:</span>
-                <select
-                  value={billTypeFilter}
-                  onChange={(e) => setBillTypeFilter(e.target.value)}
-                  className="rounded-lg border border-surface-300 p-1.5 font-bold"
-                >
-                  <option value="">All (Kacha + Pakka)</option>
-                  <option value="PAKKA">Pakka GST Invoices Only</option>
-                  <option value="KACHA">Kacha Estimates Only</option>
-                </select>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="lg:col-span-3 bg-white rounded-2xl border border-surface-200 p-3 shadow-xs space-y-4 no-print">
+          {REPORTS.map((g) => (
+            <div key={g.group}>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-surface-400 px-2 mb-1">{g.group}</p>
+              <div className="space-y-0.5">
+                {g.items.map((it) => (
+                  <button key={it.key} type="button" onClick={() => setReportKey(it.key)}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold ${reportKey === it.key ? 'bg-gold-500 text-white' : 'text-surface-600 hover:bg-surface-50'}`}>
+                    {it.label}
+                  </button>
+                ))}
               </div>
-
-              {salesData?.data?.summary && (
-                <div className="flex gap-4 text-xs font-bold">
-                  <span>Total Sales: {formatCurrency(salesData.data.summary.totalSales)}</span>
-                  <span className="text-emerald-700">Paid: {formatCurrency(salesData.data.summary.totalPaid)}</span>
-                  <span className="text-amber-600">Due: {formatCurrency(salesData.data.summary.totalDue)}</span>
-                </div>
-              )}
             </div>
+          ))}
+        </div>
 
-            {salesLoading ? (
-              <TableSkeleton rows={6} cols={8} />
-            ) : (
-              <Table
-                headers={[
-                  'Invoice No',
-                  'Type',
-                  'Customer',
-                  'Date',
-                  { label: 'Taxable Amount', align: 'right' },
-                  { label: 'Tax (GST)', align: 'right' },
-                  { label: 'Grand Total', align: 'right' },
-                  { label: 'Balance Due', align: 'right' }
-                ]}
-              >
-                {salesData?.data?.data?.map((row, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell className="font-mono font-bold text-surface-900">{row.invoiceNo}</TableCell>
-                    <TableCell>
-                      <Badge variant={row.billType === 'KACHA' ? 'kacha' : 'pakka'} size="sm">
-                        {row.billType}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-semibold">{row.customerName || 'Walk-in'}</TableCell>
-                    <TableCell className="text-surface-500">{formatDate(row.invoiceDate)}</TableCell>
-                    <TableCell align="right">{formatCurrency(row.taxableAmount)}</TableCell>
-                    <TableCell align="right">{formatCurrency(row.taxAmount)}</TableCell>
-                    <TableCell align="right" className="font-bold text-surface-900">
-                      {formatCurrency(row.grandTotal)}
-                    </TableCell>
-                    <TableCell
-                      align="right"
-                      className={`font-semibold ${row.due > 0 ? 'text-amber-600 font-bold' : 'text-surface-400'}`}
-                    >
-                      {formatCurrency(row.due)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </Table>
-            )}
+        <div className="lg:col-span-9 space-y-4">
+          {meta?.dated && (
+            <div className="flex flex-wrap items-center gap-3 bg-white p-3 rounded-2xl border border-surface-200 shadow-xs no-print">
+              <Calendar className="w-4 h-4 text-gold-600" />
+              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="!w-auto" />
+              <span className="text-surface-400 text-xs">to</span>
+              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="!w-auto" />
+              {isFetching && <span className="text-[11px] text-surface-400">Refreshing…</span>}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {Object.entries(summary).filter(([k, v]) => typeof v === 'number' || typeof v === 'string').slice(0, 8).map(([k, v]) => (
+              <div key={k} className="p-3 rounded-xl bg-white border border-surface-200 shadow-xs">
+                <p className="text-[10px] uppercase font-bold text-surface-500 truncate">{SUMMARY_LABELS[k] || k}</p>
+                <p className="text-sm font-black font-display text-surface-900 mt-0.5">
+                  {typeof v === 'number' ? (isWeight(k) ? formatWeight(v) : isMoney(k) ? formatCurrency(v) : v) : v}
+                </p>
+              </div>
+            ))}
           </div>
-        )}
 
-        {/* Report 2: Stock Report */}
-        {reportType === 'STOCK' && (
-          <div className="space-y-4">
-            {stockData?.data?.summary && (
-              <div className="p-3 bg-gold-50/60 rounded-xl border border-gold-200 flex justify-between text-xs font-bold text-surface-900">
-                <span>Total Vault Pieces: {stockData.data.summary.totalPieces}</span>
-                <span>Total Net Weight: {formatWeight(stockData.data.summary.totalNetWeight)}</span>
-                <span>Total Valuation Cost: {formatCurrency(stockData.data.summary.totalValuation)}</span>
+          <div className="bg-white rounded-2xl border border-surface-200 shadow-xs overflow-hidden">
+            {isLoading ? (
+              <div className="p-4"><TableSkeleton rows={8} cols={6} /></div>
+            ) : rows.length === 0 ? (
+              <div className="text-center py-16 text-xs text-surface-400 flex flex-col items-center gap-2">
+                <BarChart3 className="w-8 h-8 text-surface-300" />
+                No data for this period
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-surface-50 text-[10px] uppercase font-bold text-surface-600 border-b border-surface-200 sticky top-0">
+                    <tr>{columns.map((c) => <th key={c} className={`py-2.5 px-3 whitespace-nowrap ${isMoney(c) || isWeight(c) || typeof rows[0][c] === 'number' ? 'text-right' : ''}`}>{SUMMARY_LABELS[c] || c.replace(/([A-Z])/g, ' $1')}</th>)}</tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-100">
+                    {rows.map((row, idx) => (
+                      <tr key={row._id || idx} className="hover:bg-surface-50/50">
+                        {columns.map((c) => {
+                          const v = row[c];
+                          const numeric = typeof v === 'number';
+                          let display = v;
+                          if (v instanceof Date || (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v))) display = formatDate(v);
+                          else if (numeric && isWeight(c)) display = formatWeight(v);
+                          else if (numeric && isMoney(c)) display = formatCurrency(v);
+                          else if (numeric) display = v;
+                          else if (v === null || v === undefined) display = '-';
+                          return <td key={c} className={`py-2 px-3 whitespace-nowrap ${numeric ? 'text-right font-semibold text-surface-800' : 'text-surface-700'}`}>{String(display)}</td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
-
-            {stockLoading ? (
-              <TableSkeleton rows={6} cols={8} />
-            ) : (
-              <Table
-                headers={[
-                  'Barcode',
-                  'Product Name',
-                  'Metal',
-                  'Purity',
-                  { label: 'Gross Wt', align: 'right' },
-                  { label: 'Net Wt', align: 'right' },
-                  { label: 'Qty', align: 'center' },
-                  { label: 'Cost Valuation', align: 'right' }
-                ]}
-              >
-                {stockData?.data?.data?.map((row, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell className="font-mono font-bold text-surface-900">{row.barcode}</TableCell>
-                    <TableCell className="font-semibold">{row.productName}</TableCell>
-                    <TableCell>{row.metal}</TableCell>
-                    <TableCell className="font-bold text-gold-800">{row.purity}</TableCell>
-                    <TableCell align="right">{formatWeight(row.grossWeight)}</TableCell>
-                    <TableCell align="right" className="font-bold">{formatWeight(row.netWeight)}</TableCell>
-                    <TableCell align="center">{row.quantity}</TableCell>
-                    <TableCell align="right" className="font-extrabold text-surface-900">
-                      {formatCurrency((row.costPrice || 0) * (row.quantity || 1))}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </Table>
-            )}
           </div>
-        )}
-
-        {/* Report 3: Customer Outstanding */}
-        {reportType === 'CUSTOMER_DUE' && (
-          <div className="space-y-4">
-            {custData?.data?.summary && (
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 flex justify-between text-xs font-bold text-amber-900">
-                <span>Customers with Due Balance: {custData.data.summary.customerCount}</span>
-                <span>Total Outstanding Credit: {formatCurrency(custData.data.summary.totalOutstanding)}</span>
-              </div>
-            )}
-
-            {custLoading ? (
-              <TableSkeleton rows={5} cols={5} />
-            ) : (
-              <Table
-                headers={[
-                  'Customer Name',
-                  'Mobile Contact',
-                  'Location',
-                  { label: 'Outstanding Balance Due', align: 'right' }
-                ]}
-              >
-                {custData?.data?.data?.map((c) => (
-                  <TableRow key={c.id}>
-                    <TableCell className="font-bold text-surface-900">{c.name}</TableCell>
-                    <TableCell className="text-surface-700">📞 {c.mobile}</TableCell>
-                    <TableCell className="text-surface-500">{c.city || '-'}, {c.state || '-'}</TableCell>
-                    <TableCell align="right" className="font-black text-amber-600 font-display text-sm">
-                      {formatCurrency(c.balance)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </Table>
-            )}
-          </div>
-        )}
-
-        {/* Report 4: Vendor Outstanding */}
-        {reportType === 'VENDOR_DUE' && (
-          <div className="space-y-4">
-            {vendorData?.data?.summary && (
-              <div className="p-3 bg-surface-100 rounded-xl border border-surface-200 flex justify-between text-xs font-bold text-surface-900">
-                <span>Vendors with Payable Balances: {vendorData.data.summary.vendorCount}</span>
-                <span>Total Payables Due: {formatCurrency(vendorData.data.summary.totalPayable)}</span>
-              </div>
-            )}
-
-            {vendorLoading ? (
-              <TableSkeleton rows={5} cols={5} />
-            ) : (
-              <Table
-                headers={[
-                  'Firm / Company',
-                  'Contact Person',
-                  'Mobile',
-                  { label: 'Payable Amount', align: 'right' }
-                ]}
-              >
-                {vendorData?.data?.data?.map((v) => (
-                  <TableRow key={v.id}>
-                    <TableCell className="font-bold text-surface-900">{v.company || v.name}</TableCell>
-                    <TableCell className="text-surface-700">{v.name}</TableCell>
-                    <TableCell className="text-surface-500">📞 {v.mobile || '-'}</TableCell>
-                    <TableCell align="right" className="font-black text-rose-600 font-display text-sm">
-                      {formatCurrency(v.balance)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </Table>
-            )}
-          </div>
-        )}
+        </div>
       </div>
+
+      {showRecon && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setShowRecon(false)}>
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-5 space-y-4 text-xs" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-surface-900 text-sm">Books Consistency Check</h3>
+              <button onClick={() => setShowRecon(false)} className="text-surface-400 hover:text-surface-700">✕</button>
+            </div>
+            {!reconData ? <TableSkeleton rows={3} cols={2} /> : reconData.data.ok ? (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-2"><ShieldCheck className="w-5 h-5" /> All checked customer/vendor balances and invoice/purchase payment positions match the ledger.</div>
+            ) : (
+              <>
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> {reconData.data.issueCount} inconsistency(ies) found</div>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {reconData.data.issues.map((iss, idx) => (
+                    <div key={idx} className="p-2.5 rounded-lg border border-surface-200 bg-surface-50">
+                      <p className="font-bold text-surface-800">{iss.type.replace(/_/g, ' ')} — {iss.name || iss.invoiceNo || iss.purchaseNo}</p>
+                      <p className="text-surface-500">Stored: {JSON.stringify(iss.stored ?? iss.ledger ?? iss)} </p>
+                      {iss.expected && <p className="text-surface-500">Expected: {JSON.stringify(iss.expected)}</p>}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-end">
+                  <Button size="sm" variant="primary" icon={RefreshCcw} isLoading={fixing} onClick={runFix}>Re-derive invoice/purchase totals</Button>
+                </div>
+                <p className="text-[10px] text-surface-400">This only re-derives invoice and purchase payment positions from their payments — it never changes a customer/vendor ledger balance automatically.</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

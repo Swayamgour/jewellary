@@ -5,6 +5,7 @@ import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { useCreateCustomerMutation } from '../../app/api/baseApi';
 import { toast } from 'sonner';
+import { getErrorMessage } from '../../utils/errors';
 
 export const CustomerSelectModal = ({ isOpen, onClose, onCustomerCreated }) => {
   const [createCustomer, { isLoading }] = useCreateCustomerMutation();
@@ -56,7 +57,7 @@ export const CustomerSelectModal = ({ isOpen, onClose, onCustomerCreated }) => {
       }
       onClose();
     } catch (err) {
-      toast.error(err?.data?.message || 'Failed to create customer');
+      toast.error(getErrorMessage(err, 'Failed to create customer'));
     }
   };
 
