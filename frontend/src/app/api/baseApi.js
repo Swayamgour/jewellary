@@ -2,7 +2,7 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { logout } from '../../features/auth/authSlice';
 
 // Set VITE_API_URL in .env (see .env.example). Must include the /api suffix.
-export const API_URL = 'http://localhost:5001/api'
+export const API_URL = 'https://jjc.admin.poornainvisiblegrills.com/api'
 
 const baseQuery = fetchBaseQuery({
   baseUrl: API_URL,
