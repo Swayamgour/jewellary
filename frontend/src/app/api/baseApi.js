@@ -7,6 +7,7 @@ export const API_URL = 'https://jjc.admin.poornainvisiblegrills.com/api'
 const baseQuery = fetchBaseQuery({
   baseUrl: API_URL,
   prepareHeaders: (headers, { getState }) => {
+    
     const state = getState();
     const token = state.auth?.token;
     const branch = state.auth?.branch;
